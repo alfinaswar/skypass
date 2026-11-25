@@ -58,6 +58,7 @@ Route::middleware('auth')->group(function () {
 
     // 8. --- TRANSACTION HISTORY (LIST) ---
     Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
+    Route::get('/transactions/proofs/{detail}/{type}', [TransactionController::class, 'showInstallationProof'])->whereIn('type', ['before', 'after'])->name('transactions.proof');
 
     // 9. --- PENDING ISSUES (GI - Barang Keluar) ---
     Route::get('/transactions/pending', [TransactionController::class, 'indexPending'])->name('transactions.pending');

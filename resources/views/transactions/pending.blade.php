@@ -58,62 +58,58 @@
                                     <th class="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
+                            <tbody class="bg-white">
                                 @forelse($pendingTransactions as $trx)
-                                    <tr class="hover:bg-gray-50 transition-colors">
-                                        <!-- Date -->
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {{ \Carbon\Carbon::parse($trx->date)->format('d M Y') }}
-                                            <div class="text-xs text-gray-400">{{ \Carbon\Carbon::parse($trx->created_at)->format('H:i') }}</div>
-                                        </td>
-                                        
-                                        <!-- Invoice
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
-                                            {{ $trx->invoice_no }}
-                                        </td> -->
+                                    @php $rowCount = $trx->items->count(); @endphp
+                                    @foreach($trx->items as $item)
+                                        <tr class="hover:bg-gray-50 transition-colors">
+                                            @if($loop->first)
+                                                <!-- Date (Merged) -->
+                                                <td rowspan="{{ $rowCount }}" class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 align-top border-b border-gray-200">
+                                                    {{ \Carbon\Carbon::parse($trx->date)->format('d M Y') }}
+                                                    <div class="text-xs text-gray-400">{{ \Carbon\Carbon::parse($trx->created_at)->format('H:i') }}</div>
+                                                </td>
 
-                                        <!-- Requester / Vehicle -->
-                                        <td class="px-6 py-4 text-center">
-                                            <div class="text-sm font-bold text-gray-900">{{ $trx->requester_name }}</div>
-                                            <div class="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full inline-block mt-1 mx-auto">
-                                                {{ $trx->fleet_number }}
-                                            </div>
-                                        </td>
-
-                                        <!-- Part Info -->
-                                        <td class="px-6 py-4">
-                                            <div class="text-sm text-gray-900 font-medium">{{ $trx->part_name }}</div>
-                                        </td>
-
-                                        <!-- Qty -->
-                                        <td class="px-6 py-4 text-center whitespace-nowrap">
-                                            <span class="px-3 py-1 inline-flex text-sm leading-5 font-bold rounded-full bg-yellow-100 text-yellow-800 whitespace-nowrap">
-                                                {{ $trx->qty }} {{ $trx->unit }}
-                                            </span>
-                                        </td>
-
-                                        <!-- Actions -->
-                                        <td class="px-6 py-4 text-right text-sm font-medium space-x-2">
-                                            <!-- Tombol Verify (Upload Proof) -->
-                                            <button onclick="openVerifyModal('{{ $trx->id }}', '{{ $trx->invoice_no }}')" 
-                                                class="text-blue-600 hover:text-blue-900 font-bold focus:outline-none transition">
-                                                Upload Proof
-                                            </button>
-                                            
-                                            <!-- Tombol Cancel (Supervisor Only) -->
-                                            @if(auth()->user()->role === 'supervisor')
-                                                <button onclick="openCancelModal('{{ $trx->id }}', '{{ $trx->invoice_no }}')" 
-                                                    class="text-red-600 hover:text-red-900 font-bold ml-3 focus:outline-none transition">
-                                                    Cancel
-                                                </button>
-                                            @else
-                                                <!-- Disabled Button for Non-Supervisor -->
-                                                <button disabled class="text-gray-400 font-bold ml-3 cursor-not-allowed" title="Only Supervisor can cancel">
-                                                    Cancel
-                                                </button>
+                                                <!-- Requester / Vehicle (Merged) -->
+                                                <td rowspan="{{ $rowCount }}" class="px-6 py-4 text-center align-top border-b border-gray-200">
+                                                    <div class="text-sm font-bold text-gray-900">{{ $trx->requester_name }}</div>
+                                                    <div class="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full inline-block mt-1 mx-auto">
+                                                        {{ $trx->fleet_number }}
+                                                    </div>
+                                                </td>
                                             @endif
-                                        </td>
-                                    </tr>
+
+                                            <!-- Part Info -->
+                                            <td class="px-6 py-4 {{ $loop->last ? 'border-b border-gray-200' : '' }}">
+                                                <div class="text-sm text-gray-900 font-medium">{{ $item->part_name }}</div>
+                                            </td>
+
+                                            <!-- Qty -->
+                                            <td class="px-6 py-4 text-center whitespace-nowrap {{ $loop->last ? 'border-b border-gray-200' : '' }}">
+                                                <span class="px-3 py-1 inline-flex text-sm leading-5 font-bold rounded-full bg-yellow-100 text-yellow-800 whitespace-nowrap">
+                                                    {{ $item->qty }} {{ $item->unit }}
+                                                </span>
+                                            </td>
+
+                                            <!-- Actions -->
+                                            <td class="px-6 py-4 text-right text-sm font-medium space-x-2 whitespace-nowrap {{ $loop->last ? 'border-b border-gray-200' : '' }}">
+                                                <button onclick='openVerifyModal(@json($trx->id), @json($trx->invoice_no), {{ $item->qty }}, {{ $item->sparepart_id }}, @json($item->part_name))' 
+                                                    class="text-blue-600 hover:text-blue-900 font-bold focus:outline-none transition">
+                                                    Upload Proof
+                                                </button>
+                                                @if(auth()->user()->role === 'supervisor')
+                                                    <button onclick='openCancelModal(@json($trx->id), @json($trx->invoice_no), {{ $item->sparepart_id }}, @json($item->part_name))' 
+                                                        class="text-red-600 hover:text-red-900 font-bold ml-3 focus:outline-none transition">
+                                                        Cancel
+                                                    </button>
+                                                @else
+                                                    <button disabled class="text-gray-400 font-bold ml-3 cursor-not-allowed" title="Only Supervisor can cancel">
+                                                        Cancel
+                                                    </button>
+                                                @endif
+                                            </td>
+                                        </tr>
+                                    @endforeach
                                 @empty
                                     <tr>
                                         <td colspan="6" class="px-6 py-10 text-center text-gray-500">
@@ -139,11 +135,12 @@
 
         <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
             <!-- Diperlebar dari sm:max-w-lg menjadi sm:max-w-2xl agar muat 2 kotak -->
-            <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
+            <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-4xl" style="max-width: 56rem;">
                 <form id="verifyForm" method="POST" enctype="multipart/form-data">
                     @csrf
                     @method('PUT')
                     <input type="hidden" name="action" value="verify">
+                    <input type="hidden" name="sparepart_id" id="verify_sparepart_id" value="">
                     
                     <div class="bg-white p-6">
                         <div class="sm:flex sm:items-start">
@@ -157,6 +154,8 @@
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Upload Installation Photos (Bukti Pasang)</label>
                                     
                                     <!-- Grid 2 Kolom untuk Before & After -->
+                                    <div id="unitProofs" class="space-y-4 max-h-[60vh] overflow-y-auto"></div>
+                                    <template id="unitProofTemplate">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         
                                         <!-- KOTAK KIRI: BEFORE -->
@@ -168,18 +167,19 @@
                                                 
                                                 <div class="mt-1 flex justify-center px-4 pt-4 pb-4 border-2 border-gray-300 border-dashed rounded-md bg-white hover:border-blue-700 hover:bg-blue-50 transition-colors cursor-pointer group" 
                                                      onclick="document.getElementById('verify_proof_image_before').click()">
-                                                    <div class="space-y-1 text-center">
+                                                    <div class="space-y-1 text-center w-full">
                                                         <svg id="uploadIconBefore" class="mx-auto h-8 w-8 text-gray-400 group-hover:text-blue-700" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                                                         </svg>
                                                         <img id="imagePreviewBefore" class="hidden mx-auto h-24 w-auto object-contain rounded-md mb-1" />
                                                         
                                                         <div class="flex text-xs text-gray-600 justify-center">
-                                                            <span id="verifyFileNameBefore" class="font-medium text-blue-700">Click/Paste</span>
+                                                            <span id="verifyFileNameBefore" class="upload-file-label font-medium text-blue-700">Click/Paste (Multiple)</span>
                                                         </div>
-                                                        <input id="verify_proof_image_before" name="proof_image_before" type="file" class="sr-only" accept=".jpg,.jpeg,.png,.pdf" required onchange="validateAndUpdateVerifyFileName(this, 'before')">
+                                                        <input id="verify_proof_image_before" name="proof_image_before[]" type="file" multiple class="sr-only" accept=".jpg,.jpeg,.png,.pdf" required onchange="validateAndUpdateVerifyFileName(this, 'before')">
                                                     </div>
                                                 </div>
+                                                <div class="proof-preview-list grid grid-cols-3 gap-2 mt-2 hidden"></div>
                                             </div>
                                             <button type="button" onclick="openCameraModal('before')" class="mt-2 text-xs font-bold text-blue-700 hover:text-blue-900 flex items-center justify-center w-full focus:outline-none py-1 border border-gray-300 rounded bg-white shadow-sm hover:bg-gray-100">
                                                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -196,18 +196,19 @@
                                                 
                                                 <div class="mt-1 flex justify-center px-4 pt-4 pb-4 border-2 border-gray-300 border-dashed rounded-md bg-white hover:border-blue-700 hover:bg-blue-50 transition-colors cursor-pointer group" 
                                                      onclick="document.getElementById('verify_proof_image').click()">
-                                                    <div class="space-y-1 text-center">
+                                                    <div class="space-y-1 text-center w-full">
                                                         <svg id="uploadIconAfter" class="mx-auto h-8 w-8 text-gray-400 group-hover:text-blue-700" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                                                         </svg>
                                                         <img id="imagePreviewAfter" class="hidden mx-auto h-24 w-auto object-contain rounded-md mb-1" />
                                                         
                                                         <div class="flex text-xs text-gray-600 justify-center">
-                                                            <span id="verifyFileNameAfter" class="font-medium text-blue-700">Click/Paste</span>
+                                                            <span id="verifyFileNameAfter" class="upload-file-label font-medium text-blue-700">Click/Paste (Multiple)</span>
                                                         </div>
-                                                        <input id="verify_proof_image" name="proof_image" type="file" class="sr-only" accept=".jpg,.jpeg,.png,.pdf" required onchange="validateAndUpdateVerifyFileName(this, 'after')">
+                                                        <input id="verify_proof_image" name="proof_image[]" type="file" multiple class="sr-only" accept=".jpg,.jpeg,.png,.pdf" required onchange="validateAndUpdateVerifyFileName(this, 'after')">
                                                     </div>
                                                 </div>
+                                                <div class="proof-preview-list grid grid-cols-3 gap-2 mt-2 hidden"></div>
                                             </div>
                                             <button type="button" onclick="openCameraModal('after')" class="mt-2 text-xs font-bold text-blue-700 hover:text-blue-900 flex items-center justify-center w-full focus:outline-none py-1 border border-gray-300 rounded bg-white shadow-sm hover:bg-gray-100">
                                                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -216,6 +217,7 @@
                                         </div>
 
                                     </div>
+                                    </template>
                                     <p class="text-[10px] text-gray-400 mt-2 text-center">Format: PNG, JPG, PDF maks. 5MB</p>
                                 </div>
                             </div>
@@ -241,6 +243,7 @@
                     @csrf
                     @method('PUT')
                     <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="sparepart_id" id="cancel_sparepart_id" value="">
                     
                     <div class="bg-white p-6">
                         <div class="sm:flex sm:items-start">
@@ -269,32 +272,48 @@
     <!-- Scripts -->
     <script>
         // FUNGSI UMUM MODAL
-        function openVerifyModal(id, invoice) {
-            document.getElementById('verifyInvoice').textContent = invoice;
+        let proofFileBuffers = {};
+
+        function openVerifyModal(id, invoice, qty, sparepartId = '', partName = '') {
+            proofFileBuffers = {};
+            document.getElementById('verifyInvoice').textContent = partName ? `${invoice} — ${partName}` : invoice;
+            document.getElementById('verify_sparepart_id').value = sparepartId || '';
             const url = "{{ url('/transactions/pending') }}/" + id;
             document.getElementById('verifyForm').action = url;
+            const proofs = document.getElementById('unitProofs');
+            proofs.replaceChildren();
+            const unit = 0;
+            const fragment = document.getElementById('unitProofTemplate').content.cloneNode(true);
+            fragment.querySelectorAll('.border-gray-200.rounded-lg').forEach((container, index) => {
+                const target = index === 0 ? 'before' : 'after';
+                const targetKey = `${unit}-${target}`;
+                proofFileBuffers[targetKey] = new DataTransfer();
+                container.id = `container-${targetKey}`;
+                container.querySelector('label').lastChild.textContent = ` ${index + 1}. Foto ${target === 'before' ? 'Sebelum' : 'Sesudah'}`;
+                const input = container.querySelector('input[type="file"]');
+                input.id = `proof-${targetKey}`;
+                input.name = `proofs[${unit}][${target}][]`;
+                input.setAttribute('onchange', `handleProofFilesSelected(this, '${targetKey}')`);
+                container.querySelector('[onclick*="document.getElementById"]').setAttribute('onclick', `document.getElementById('proof-${targetKey}').click()`);
+                container.querySelector('img').id = `preview-${targetKey}`;
+                container.querySelector('svg').id = `icon-${targetKey}`;
+                container.querySelector('.upload-file-label').id = `label-${targetKey}`;
+                container.querySelector('.proof-preview-list').id = `preview-list-${targetKey}`;
+                container.querySelector('button').setAttribute('onclick', `openCameraModal('${targetKey}')`);
+            });
+            proofs.append(fragment);
             document.getElementById('verifyModal').classList.remove('hidden');
         }
 
         function closeVerifyModal() {
             document.getElementById('verifyModal').classList.add('hidden');
-            
-            // Reset kedua input & preview saat modal ditutup
-            ['before', 'after'].forEach(target => {
-                const preview = document.getElementById('imagePreview' + (target === 'before' ? 'Before' : 'After'));
-                const icon = document.getElementById('uploadIcon' + (target === 'before' ? 'Before' : 'After'));
-                const label = document.getElementById('verifyFileName' + (target === 'before' ? 'Before' : 'After'));
-                const input = document.getElementById(target === 'before' ? 'verify_proof_image_before' : 'verify_proof_image');
-                
-                if(preview) { preview.src = '#'; preview.classList.add('hidden'); }
-                if(icon) { icon.classList.remove('hidden'); }
-                if(label) { label.textContent = 'Click/Paste'; }
-                if(input) { input.value = ''; }
-            });
+            proofFileBuffers = {};
+            document.getElementById('unitProofs').replaceChildren();
         }
 
-        function openCancelModal(id, invoice) {
-            document.getElementById('cancelInvoice').textContent = invoice;
+        function openCancelModal(id, invoice, sparepartId = '', partName = '') {
+            document.getElementById('cancelInvoice').textContent = partName ? `${invoice} — ${partName}` : invoice;
+            document.getElementById('cancel_sparepart_id').value = sparepartId || '';
             const url = "{{ url('/transactions/pending') }}/" + id;
             document.getElementById('cancelForm').action = url;
             document.getElementById('cancelModal').classList.remove('hidden');
@@ -305,60 +324,128 @@
         }
 
         // --- LOGIKA MULTI UPLOAD (BEFORE & AFTER) ---
-        
-        // Menyimpan state kotak mana yang sedang aktif untuk Camera / Paste
-        let currentCameraTarget = 'before'; 
-        let activePasteTarget = 'before';   
+        let currentCameraTarget = '0-before';
+        let activePasteTarget = '0-before';
         let videoStream = null;
 
-        // Listener hover & klik agar saat Ctrl+V tahu mau masuk ke kotak mana
-        document.getElementById('containerBefore')?.addEventListener('mouseenter', () => { activePasteTarget = 'before'; });
-        document.getElementById('containerBefore')?.addEventListener('click', () => { activePasteTarget = 'before'; });
-        document.getElementById('containerAfter')?.addEventListener('mouseenter', () => { activePasteTarget = 'after'; });
-        document.getElementById('containerAfter')?.addEventListener('click', () => { activePasteTarget = 'after'; });
+        document.getElementById('unitProofs')?.addEventListener('mouseover', event => {
+            const container = event.target.closest('[id^="container-"]');
+            if (container) activePasteTarget = container.id.replace('container-', '');
+        });
 
-        // Fungsi membaca dan memvalidasi gambar yang diupload
-        function validateAndUpdateVerifyFileName(input, target) {
-            const isBefore = target === 'before';
-            const label = document.getElementById(isBefore ? 'verifyFileNameBefore' : 'verifyFileNameAfter');
-            const preview = document.getElementById(isBefore ? 'imagePreviewBefore' : 'imagePreviewAfter');
-            const icon = document.getElementById(isBefore ? 'uploadIconBefore' : 'uploadIconAfter');
-            
-            if (input.files && input.files.length > 0) {
-                const file = input.files[0];
-                
-                // Validasi ukuran max 5MB
-                if(file.size / 1024 / 1024 > 5) {
-                    alert('Max file size is 5MB!');
-                    input.value = '';
-                    label.textContent = 'Click/Paste';
-                    return;
-                }
+        function handleProofFilesSelected(input, target) {
+            if (!input.files || input.files.length === 0) return;
+            addFilesToProofBuffer(target, Array.from(input.files));
+        }
 
-                // Ganti teks label dengan nama file yang terpotong rapi
-                label.textContent = file.name.substring(0, 15) + (file.name.length > 15 ? '...' : '');
-
-                // Logika untuk file PDF
-                if (file.type === 'application/pdf') {
-                    preview.classList.add('hidden');
-                    icon.classList.remove('hidden');
-                    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>';
-                } else {
-                    // Logika untuk file Gambar
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        preview.src = e.target.result;
-                        preview.classList.remove('hidden');
-                        icon.classList.add('hidden');
-                    }
-                    reader.readAsDataURL(file);
-                }
-            } else {
-                label.textContent = 'Click/Paste';
-                preview.src = '#';
-                preview.classList.add('hidden');
-                icon.classList.remove('hidden');
+        function addFilesToProofBuffer(target, files) {
+            if (!proofFileBuffers[target]) {
+                proofFileBuffers[target] = new DataTransfer();
             }
+            const dt = proofFileBuffers[target];
+
+            for (const file of files) {
+                if (file.size / 1024 / 1024 > 5) {
+                    alert(`File "${file.name}" melebihi batas maksimal 5MB!`);
+                    continue;
+                }
+                dt.items.add(file);
+            }
+
+            syncProofInputAndPreviews(target);
+        }
+
+        function removeProofFile(target, index) {
+            const oldDt = proofFileBuffers[target];
+            if (!oldDt) return;
+            const newDt = new DataTransfer();
+            Array.from(oldDt.files).forEach((file, i) => {
+                if (i !== index) newDt.items.add(file);
+            });
+            proofFileBuffers[target] = newDt;
+            syncProofInputAndPreviews(target);
+        }
+
+        function syncProofInputAndPreviews(target) {
+            const input = document.getElementById(`proof-${target}`);
+            const label = document.getElementById(`label-${target}`);
+            const list = document.getElementById(`preview-list-${target}`);
+            const dt = proofFileBuffers[target] || new DataTransfer();
+
+            if (input) input.files = dt.files;
+
+            const count = dt.files.length;
+            if (label) {
+                label.textContent = count > 0 ? `${count} file dipilih (+ tambah lagi)` : 'Click/Paste (Multiple)';
+            }
+
+            if (!list) return;
+            list.innerHTML = '';
+
+            if (count === 0) {
+                list.classList.add('hidden');
+                list.style.display = 'none';
+                return;
+            }
+
+            list.classList.remove('hidden');
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(3, minmax(0, 1fr))';
+            list.style.gap = '0.5rem';
+            list.style.marginTop = '0.75rem';
+            list.style.maxHeight = '16rem';
+            list.style.overflowY = 'auto';
+
+            Array.from(dt.files).forEach((file, idx) => {
+                const card = document.createElement('div');
+                card.className = 'relative border border-gray-200 rounded bg-white p-1 flex flex-col items-center';
+                card.style.position = 'relative';
+                card.style.overflow = 'hidden';
+
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.title = 'Hapus file';
+                removeBtn.className = 'bg-red-600 text-white rounded-full flex items-center justify-center shadow hover:bg-red-700';
+                removeBtn.style.position = 'absolute';
+                removeBtn.style.top = '0.25rem';
+                removeBtn.style.right = '0.25rem';
+                removeBtn.style.width = '1.25rem';
+                removeBtn.style.height = '1.25rem';
+                removeBtn.style.fontSize = '12px';
+                removeBtn.style.lineHeight = '1';
+                removeBtn.style.zIndex = '10';
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeProofFile(target, idx);
+                };
+                card.appendChild(removeBtn);
+
+                if (file.type === 'application/pdf') {
+                    const pdfBadge = document.createElement('div');
+                    pdfBadge.className = 'w-full flex items-center justify-center bg-red-50 text-red-600 rounded text-xs font-bold';
+                    pdfBadge.style.height = '4.5rem';
+                    pdfBadge.textContent = 'PDF';
+                    card.appendChild(pdfBadge);
+                } else {
+                    const img = document.createElement('img');
+                    img.className = 'w-full rounded';
+                    img.style.height = '4.5rem';
+                    img.style.width = '100%';
+                    img.style.objectFit = 'cover';
+                    const reader = new FileReader();
+                    reader.onload = (e) => { img.src = e.target.result; };
+                    reader.readAsDataURL(file);
+                    card.appendChild(img);
+                }
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'text-[10px] text-gray-600 truncate w-full text-center mt-1';
+                nameEl.textContent = file.name;
+                card.appendChild(nameEl);
+
+                list.appendChild(card);
+            });
         }
 
         // --- LOGIKA KAMERA ---
@@ -389,15 +476,7 @@
                 const fileName = "camera_" + currentCameraTarget + "_" + Date.now() + ".jpg";
                 const file = new File([blob], fileName, { type: "image/jpeg" });
                 
-                // Pilih input mana yang diisi file
-                const inputId = currentCameraTarget === 'before' ? 'verify_proof_image_before' : 'verify_proof_image';
-                const input = document.getElementById(inputId);
-                
-                const dt = new DataTransfer(); 
-                dt.items.add(file); 
-                input.files = dt.files;
-                
-                validateAndUpdateVerifyFileName(input, currentCameraTarget);
+                addFilesToProofBuffer(currentCameraTarget, [file]);
                 stopCamera();
             }, 'image/jpeg', 0.9);
         }
@@ -428,18 +507,10 @@
 
                     const file = new File([blob], "pasted_" + activePasteTarget + "_" + Date.now() + ".png", { type: blob.type });
                     
-                    const inputId = activePasteTarget === 'before' ? 'verify_proof_image_before' : 'verify_proof_image';
-                    const input = document.getElementById(inputId);
-                    
-                    const dt = new DataTransfer(); 
-                    dt.items.add(file); 
-                    input.files = dt.files;
-                    
-                    validateAndUpdateVerifyFileName(input, activePasteTarget);
+                    addFilesToProofBuffer(activePasteTarget, [file]);
                     
                     // Efek visual border biru berkedip
-                    const containerId = activePasteTarget === 'before' ? 'containerBefore' : 'containerAfter';
-                    const container = document.getElementById(containerId);
+                    const container = document.getElementById(`container-${activePasteTarget}`);
                     if (container) {
                         container.style.borderColor = '#1d4ed8';
                         setTimeout(() => container.style.borderColor = '', 300);

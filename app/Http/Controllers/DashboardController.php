@@ -53,19 +53,21 @@ class DashboardController extends Controller
 
         // 4. Recent Transactions (Union GR & GI, Limit 7)
         // We join with details to get the Item Name
-        $recentTransactions = DB::table('transaction_details')
-            ->join('transactions', 'transaction_details.transaction_id', '=', 'transactions.id')
+        $recentTransactions = DB::table('transactions')
+            ->join('transaction_details', 'transactions.id', '=', 'transaction_details.transaction_id')
             ->join('spareparts', 'transaction_details.sparepart_id', '=', 'spareparts.id')
             ->select(
+                'transactions.id',
                 'transactions.created_at',
                 'transactions.type',
                 'transactions.invoice_no',
                 'transactions.status',
+                'spareparts.id as sparepart_id',
                 'spareparts.description as item_name',
-                'transaction_details.qty',
+                DB::raw('SUM(transaction_details.qty) as qty'),
                 'spareparts.unit'
             )
-            // Show all completed/canceled/pending transactions
+            ->groupBy('transactions.id', 'transactions.created_at', 'transactions.type', 'transactions.invoice_no', 'transactions.status', 'spareparts.id', 'spareparts.description', 'spareparts.unit')
             ->orderBy('transactions.created_at', 'desc')
             ->limit(7)
             ->get();

@@ -153,11 +153,12 @@ class SparepartController extends Controller
                 'transactions.source_name',     // Untuk GR (Vendor)
                 'transactions.source_type',     // Untuk GR
                 'transactions.requester_name',  // Untuk GI (Mekanik)
-                'transaction_details.qty',
+                DB::raw('SUM(transaction_details.qty) as qty'),
                 'users.name as admin_name',
                 'vehicles.fleet_number'
             )
             ->where('transaction_details.sparepart_id', $id)
+            ->groupBy('transactions.id', 'transactions.date', 'transactions.invoice_no', 'transactions.type', 'transactions.status', 'transactions.source_name', 'transactions.source_type', 'transactions.requester_name', 'users.name', 'vehicles.fleet_number')
             ->orderBy('transactions.date', 'desc')
             ->orderBy('transactions.created_at', 'desc')
             ->paginate(7); // Limit 7 per halaman sesuai request

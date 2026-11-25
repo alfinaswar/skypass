@@ -61,13 +61,14 @@ class ReportController extends Controller
                 'transactions.invoice_no',
                 'spareparts.description',
                 'spareparts.part_number',
-                'transaction_details.qty',
+                DB::raw('SUM(transaction_details.qty) as qty'),
                 'spareparts.unit',
                 'transactions.requester_name'
             )
             ->where('transactions.type', 'OUT') // Hanya pemakaian (GI)
             ->where('transactions.vehicle_id', $request->vehicle_id)
-            ->where('transactions.status', '!=', 'canceled');
+            ->where('transactions.status', '!=', 'canceled')
+            ->groupBy('transactions.date', 'transactions.invoice_no', 'spareparts.description', 'spareparts.part_number', 'spareparts.unit', 'transactions.requester_name');
 
         // Filter Tanggal Opsional
         if ($request->start_date) {
@@ -100,13 +101,14 @@ class ReportController extends Controller
             ->select(
                 'transactions.created_at',   // Tanggal & Jam
                 'spareparts.description',    // Deskripsi Part
-                'transaction_details.qty',   // Qty
+                DB::raw('SUM(transaction_details.qty) as qty'),   // Qty
                 'spareparts.unit',           // Satuan
                 'vehicles.fleet_number',     // Vehicle
                 'transactions.requester_name'// Technician
             )
             ->where('transactions.type', 'OUT')
             ->where('transactions.status', '!=', 'canceled') // Hanya yang valid
+            ->groupBy('transactions.id', 'transactions.created_at', 'spareparts.id', 'spareparts.description', 'spareparts.unit', 'vehicles.fleet_number', 'transactions.requester_name')
             ->orderBy('vehicles.fleet_number', 'asc') // SORT BY VEHICLE
             ->orderBy('transactions.created_at', 'desc');
 
@@ -144,13 +146,14 @@ class ReportController extends Controller
                 'transactions.created_at',   // Tanggal & Jam
                 'transactions.purchase_order', // Nomor PO (Untuk sorting)
                 'spareparts.description',    // Deskripsi Part
-                'transaction_details.qty',   // Qty
+                DB::raw('SUM(transaction_details.qty) as qty'),   // Qty
                 'spareparts.unit',           // Satuan
                 'transactions.source_name',  // Source
                 'transactions.source_type'   // Type Source
             )
             ->where('transactions.type', 'IN')
             ->where('transactions.status', '!=', 'canceled')
+            ->groupBy('transactions.id', 'transactions.created_at', 'transactions.purchase_order', 'spareparts.id', 'spareparts.description', 'spareparts.unit', 'transactions.source_name', 'transactions.source_type')
             ->orderBy('transactions.created_at', 'desc')
             ->orderBy('transactions.purchase_order', 'desc');
 

@@ -126,9 +126,9 @@
                                 </th>
                                 @endif
                                 
-                                <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date</th>
-                                <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Part Info</th>
-                                <th class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Qty</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date / Invoice</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Details</th>
+                                <th class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Items</th>
                                 
                                 <!-- Kolom Dinamis Berdasarkan Tab -->
                                 @if($tab === 'OUT')
@@ -144,6 +144,7 @@
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             @forelse ($transactions as $trx)
+                                @php($details = $transactionDetails->get($trx->id, collect()))
                                 <tr class="transition-colors {{ $trx->status === 'canceled' ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50' }}">
                                     <!-- BARU: Checkbox Row -->
                                     @if($tab === 'OUT')
@@ -160,18 +161,24 @@
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                         {{ \Carbon\Carbon::parse($trx->date)->format('d M Y') }}
                                         <div class="text-xs text-gray-400">{{ \Carbon\Carbon::parse($trx->created_at)->format('H:i') }}</div>
+                                        <div class="mt-1 font-mono text-xs font-semibold text-gray-600">{{ $trx->invoice_no }}</div>
                                     </td>
                                     
-                                    <!-- Part Info -->
-                                    <td class="px-6 py-4">
-                                        <div class="text-sm font-bold text-gray-900">{{ $trx->part_name }}</div>
-                                        <div class="text-xs text-gray-500">{{ $trx->part_number ?? '-' }}</div>
+                                    <!-- Transaction header details -->
+                                    <td class="px-6 py-4 text-sm">
+                                        <div class="font-bold text-gray-900">{{ $trx->user_name }}</div>
+                                        @if($tab === 'IN')
+                                            <div class="text-xs text-gray-500">{{ $trx->source_name ?? '-' }} · {{ $trx->source_type ?? '-' }}</div>
+                                            @if($trx->purchase_order)<div class="text-xs text-gray-500">PO: {{ $trx->purchase_order }}</div>@endif
+                                        @else
+                                            <div class="text-xs text-gray-500">{{ $trx->notes ?? '' }}</div>
+                                        @endif
                                     </td>
 
                                     <!-- Qty -->
                                     <td class="px-6 py-4 whitespace-nowrap text-center">
                                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-bold rounded-full {{ $tab === 'OUT' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800' }}">
-                                            {{ $trx->qty }} {{ $trx->unit }}
+                                            {{ $details->count() }} item{{ $details->count() === 1 ? '' : 's' }}
                                         </span>
                                     </td>
 
@@ -195,37 +202,65 @@
                                     <!-- Proof Image Link & Action Buttons -->
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <div class="flex items-center justify-end gap-3"> 
+                                            @if($details->isNotEmpty())
+                                                <button type="button" class="text-blue-700 hover:text-blue-900 font-semibold" aria-expanded="false" aria-controls="details-{{ $trx->id }}" onclick="toggleTransactionDetails(this, 'details-{{ $trx->id }}')">View details ({{ $details->count() }})</button>
+                                            @endif
                                             @if($trx->status === 'completed')
-                                                
-                                                <!-- 1. FOTO SEBELUM (BEFORE) -->
-                                                @if(isset($trx->proof_image_before_url) && $trx->proof_image_before_url && file_exists(public_path($trx->proof_image_before_url)))
-                                                    <a href="{{ asset($trx->proof_image_before_url) }}" target="_blank" class="inline-flex items-center text-amber-600 hover:text-amber-800 font-semibold bg-amber-50 px-2 py-1 rounded" title="View Before Image">
-                                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                        Before
-                                                    </a>
+                                                @if($trx->proof_image_before_url && file_exists(public_path($trx->proof_image_before_url)))
+                                                    <a href="{{ asset($trx->proof_image_before_url) }}" target="_blank" class="text-amber-600 hover:text-amber-800 font-semibold">Before</a>
                                                 @endif
-
-                                                <!-- 2. FOTO SESUDAH / BAST (AFTER) -->
-                                                @if(isset($trx->proof_image_url) && $trx->proof_image_url && file_exists(public_path($trx->proof_image_url)))
-                                                    @php
-                                                        $extension = strtolower(pathinfo($trx->proof_image_url, PATHINFO_EXTENSION));
-                                                    @endphp
-                                                    
-                                                    @if($extension === 'pdf')
-                                                        <a href="{{ asset($trx->proof_image_url) }}" target="_blank" class="inline-flex items-center text-red-600 hover:text-red-900 font-semibold bg-red-50 px-2 py-1 rounded" title="View PDF Document">
-                                                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                                                            View PDF
-                                                        </a>
-                                                    @else
-                                                        <a href="{{ asset($trx->proof_image_url) }}" target="_blank" class="inline-flex items-center text-blue-600 hover:text-blue-900 font-semibold bg-blue-50 px-2 py-1 rounded" title="View Uploaded Image">
-                                                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                            {{ $tab === 'OUT' ? 'After' : 'View' }}
-                                                        </a>
-                                                    @endif
+                                                @if($trx->proof_image_url && file_exists(public_path($trx->proof_image_url)))
+                                                    <a href="{{ asset($trx->proof_image_url) }}" target="_blank" class="text-blue-600 hover:text-blue-900 font-semibold">{{ $tab === 'OUT' ? 'After' : 'View' }}</a>
                                                 @endif
                                             @else
                                                 <span class="text-gray-400 text-xs italic">Canceled</span>
                                             @endif
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr id="details-{{ $trx->id }}" class="hidden bg-gray-50">
+                                    <td colspan="{{ $tab === 'OUT' ? 7 : 6 }}" class="px-6 py-4">
+                                        <div class="overflow-x-auto rounded border border-gray-200 bg-white">
+                                            <table class="min-w-full text-sm">
+                                                <thead class="bg-gray-100 text-xs uppercase text-gray-500"><tr><th class="px-4 py-2 text-left">Part</th><th class="px-4 py-2 text-left">Part number</th><th class="px-4 py-2 text-right">Qty</th>@if($tab === 'OUT')<th class="px-4 py-2 text-center">Before</th><th class="px-4 py-2 text-center">After</th>@endif</tr></thead>
+                                                <tbody class="divide-y divide-gray-100">
+                                                    @foreach($details as $detail)
+                                                        @php
+                                                            $beforeList = $detail->proof_image_before_url ? (str_starts_with(trim($detail->proof_image_before_url), '[') ? (json_decode($detail->proof_image_before_url, true) ?? [$detail->proof_image_before_url]) : [$detail->proof_image_before_url]) : [];
+                                                            $afterList = $detail->proof_image_url ? (str_starts_with(trim($detail->proof_image_url), '[') ? (json_decode($detail->proof_image_url, true) ?? [$detail->proof_image_url]) : [$detail->proof_image_url]) : [];
+                                                        @endphp
+                                                        <tr>
+                                                            <td class="px-4 py-2 font-medium text-gray-900">{{ $detail->part_name }}</td>
+                                                            <td class="px-4 py-2 text-gray-500">{{ $detail->part_number ?? '-' }}</td>
+                                                            <td class="px-4 py-2 text-right font-semibold">{{ $detail->qty }} {{ $detail->unit }}</td>
+                                                            @if($tab === 'OUT')
+                                                                <td class="px-4 py-2 text-center">
+                                                                    @if(count($beforeList) > 0)
+                                                                        <div class="flex flex-wrap justify-center gap-1.5">
+                                                                            @foreach($beforeList as $idx => $path)
+                                                                                <a href="{{ route('transactions.proof', ['detail' => $detail->id, 'type' => 'before', 'index' => $idx]) }}" target="_blank" class="text-amber-700 underline">{{ count($beforeList) > 1 ? 'Before ' . ($idx + 1) : 'Lihat Before' }}</a>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    @else
+                                                                        <span class="text-gray-400">-</span>
+                                                                    @endif
+                                                                </td>
+                                                                <td class="px-4 py-2 text-center">
+                                                                    @if(count($afterList) > 0)
+                                                                        <div class="flex flex-wrap justify-center gap-1.5">
+                                                                            @foreach($afterList as $idx => $path)
+                                                                                <a href="{{ route('transactions.proof', ['detail' => $detail->id, 'type' => 'after', 'index' => $idx]) }}" target="_blank" class="text-blue-700 underline">{{ count($afterList) > 1 ? 'After ' . ($idx + 1) : 'Lihat After' }}</a>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    @else
+                                                                        <span class="text-gray-400">-</span>
+                                                                    @endif
+                                                                </td>
+                                                            @endif
+                                                        </tr>
+                                                    @endforeach
+                                                </tbody>
+                                            </table>
                                         </div>
                                     </td>
                                 </tr>
@@ -298,6 +333,13 @@
 
     <!-- JAVASCRIPT UNTUK MODAL & CHECKBOX -->
     <script>
+        function toggleTransactionDetails(button, rowId) {
+            const row = document.getElementById(rowId);
+            const expanded = button.getAttribute('aria-expanded') === 'true';
+            button.setAttribute('aria-expanded', String(!expanded));
+            row.classList.toggle('hidden', expanded);
+        }
+
         function toggleAllCheckboxes(source) {
             const checkboxes = document.querySelectorAll('.trx-checkbox');
             checkboxes.forEach(cb => {

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\User;
 use App\Notifications\FiveDayRuleAlert;
@@ -20,29 +21,26 @@ class TransactionController extends Controller
     {
         $tab = $request->get('tab', 'OUT'); 
 
-        $query = DB::table('transaction_details')
-            ->join('transactions', 'transaction_details.transaction_id', '=', 'transactions.id')
-            ->join('spareparts', 'transaction_details.sparepart_id', '=', 'spareparts.id')
+        $query = DB::table('transactions')
             ->join('users', 'transactions.user_id', '=', 'users.id')
-            ->leftJoin('vehicles', 'transactions.vehicle_id', '=', 'vehicles.id') 
-            ->select(
-                'transactions.*', 
-                'transaction_details.qty', 
-                'spareparts.description as part_name',
-                'spareparts.part_number',
-                'spareparts.unit',
-                'users.name as user_name',
-                'vehicles.fleet_number'
-            )
+            ->leftJoin('vehicles', 'transactions.vehicle_id', '=', 'vehicles.id')
+            ->select('transactions.*', 'users.name as user_name', 'vehicles.fleet_number')
             ->where('transactions.type', $tab)
             ->whereIn('transactions.status', ['completed', 'canceled']);
 
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
-                $q->where('spareparts.description', 'like', "%{$search}%")
-                    ->orWhere('spareparts.part_number', 'like', "%{$search}%")
-                    ->orWhere('transactions.invoice_no', 'like', "%{$search}%")
+                $q->whereExists(function ($details) use ($search) {
+                    $details->selectRaw('1')
+                        ->from('transaction_details')
+                        ->join('spareparts', 'transaction_details.sparepart_id', '=', 'spareparts.id')
+                        ->whereColumn('transaction_details.transaction_id', 'transactions.id')
+                        ->where(function ($part) use ($search) {
+                            $part->where('spareparts.description', 'like', "%{$search}%")
+                                ->orWhere('spareparts.part_number', 'like', "%{$search}%");
+                        });
+                })->orWhere('transactions.invoice_no', 'like', "%{$search}%")
                     ->orWhere('transactions.purchase_order', 'like', "%{$search}%");
 
                 if (request('tab', 'OUT') === 'OUT') {
@@ -60,6 +58,20 @@ class TransactionController extends Controller
             ->orderBy('transactions.created_at', $sort);
 
         $transactions = $query->paginate(15)->withQueryString();
+        $transactionDetails = DB::table('transaction_details')
+            ->join('spareparts', 'transaction_details.sparepart_id', '=', 'spareparts.id')
+            ->join('transactions', 'transaction_details.transaction_id', '=', 'transactions.id')
+            ->whereIn('transaction_details.transaction_id', $transactions->pluck('id'))
+            ->select(
+                'transaction_details.*',
+                'spareparts.description as part_name',
+                'spareparts.part_number',
+                'spareparts.unit',
+                DB::raw('COALESCE(transaction_details.proof_image_before_url, transactions.proof_image_before_url) as proof_image_before_url'),
+                DB::raw('COALESCE(transaction_details.proof_image_url, transactions.proof_image_url) as proof_image_url')
+            )
+            ->get()
+            ->groupBy('transaction_id');
         $vehicles = DB::table('vehicles')->orderBy('fleet_number', 'asc')->get();
 
         // --- BARU: LOGIKA PENOMORAN OTOMATIS BAST ---
@@ -77,7 +89,34 @@ class TransactionController extends Controller
             $nextBastNumber = sprintf("%03d/PPNLH0102/MTC-KNO/%s-S0", $nextNumber, $currentYear);
         }
 
-        return view('transactions.index', compact('transactions', 'vehicles', 'tab', 'nextBastNumber'));
+        return view('transactions.index', compact('transactions', 'transactionDetails', 'vehicles', 'tab', 'nextBastNumber'));
+    }
+
+    public function showInstallationProof(Request $request, $detail, $type)
+    {
+        abort_unless(in_array($type, ['before', 'after'], true), 404);
+
+        $proofValue = DB::table('transaction_details')
+            ->join('transactions', 'transaction_details.transaction_id', '=', 'transactions.id')
+            ->where('transaction_details.id', $detail)
+            ->where('transactions.type', 'OUT')
+            ->where('transactions.status', 'completed')
+            ->value($type === 'before'
+                ? DB::raw('COALESCE(transaction_details.proof_image_before_url, transactions.proof_image_before_url)')
+                : DB::raw('COALESCE(transaction_details.proof_image_url, transactions.proof_image_url)'));
+
+        $paths = [];
+        if (is_string($proofValue) && $proofValue !== '') {
+            $decoded = str_starts_with(trim($proofValue), '[') ? json_decode($proofValue, true) : null;
+            $paths = is_array($decoded) ? array_values($decoded) : [$proofValue];
+        }
+
+        $index = max(0, (int) $request->query('index', 0));
+        $proofPath = $paths[$index] ?? null;
+
+        abort_unless($proofPath && Storage::disk('local')->exists($proofPath), 404);
+
+        return Storage::disk('local')->response($proofPath);
     }
 
     // --- BARU: FUNGSI DOWNLOAD PDF BAST (BULK) ---
@@ -154,13 +193,18 @@ class TransactionController extends Controller
     // --- FUNGSI PENDING ISSUE (GI) ---
     public function indexPending()
     {
-        $pendingTransactions = DB::table('transaction_details')
+        $rows = DB::table('transaction_details')
             ->join('transactions', 'transaction_details.transaction_id', '=', 'transactions.id')
             ->join('spareparts', 'transaction_details.sparepart_id', '=', 'spareparts.id')
             ->join('users', 'transactions.user_id', '=', 'users.id')
             ->join('vehicles', 'transactions.vehicle_id', '=', 'vehicles.id')
             ->select(
-                'transactions.*',
+                'transactions.id',
+                'transactions.invoice_no',
+                'transactions.date',
+                'transactions.created_at',
+                'transactions.requester_name',
+                'transaction_details.sparepart_id',
                 'transaction_details.qty',
                 'spareparts.description as part_name',
                 'spareparts.unit',
@@ -168,9 +212,35 @@ class TransactionController extends Controller
                 'vehicles.fleet_number'
             )
             ->where('transactions.type', 'OUT')
-            ->where('transactions.status', 'pending') 
+            ->where('transactions.status', 'pending')
+            ->whereNull('transaction_details.proof_image_url')
             ->orderBy('transactions.created_at', 'desc')
+            ->orderBy('transaction_details.id', 'asc')
             ->get();
+
+        $pendingTransactions = $rows->groupBy('id')->map(function ($group) {
+            $first = $group->first();
+            $items = $group->groupBy('sparepart_id')->map(function ($partGroup) {
+                $item = $partGroup->first();
+                return (object) [
+                    'sparepart_id' => $item->sparepart_id,
+                    'part_name' => $item->part_name,
+                    'unit' => $item->unit,
+                    'qty' => $partGroup->sum('qty'),
+                ];
+            })->values();
+
+            return (object) [
+                'id' => $first->id,
+                'invoice_no' => $first->invoice_no,
+                'date' => $first->date,
+                'created_at' => $first->created_at,
+                'requester_name' => $first->requester_name,
+                'user_name' => $first->user_name,
+                'fleet_number' => $first->fleet_number,
+                'items' => $items,
+            ];
+        })->values();
 
         return view('transactions.pending', compact('pendingTransactions'));
     }
@@ -178,18 +248,42 @@ class TransactionController extends Controller
     public function updatePending(Request $request, $id)
     {
         $request->validate([
-            'action'             => 'required|in:verify,cancel',
-            'proof_image_before' => 'required_if:action,verify|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'proof_image'        => 'required_if:action,verify|file|mimes:jpeg,png,jpg,pdf|max:5120',
-        ], [
-            'proof_image_before.required_if' => 'Foto sebelum pemasangan wajib diunggah untuk verifikasi.',
-            'proof_image.required_if'        => 'Foto sesudah pemasangan wajib diunggah untuk verifikasi.',
+            'action' => 'required|in:verify,cancel',
+            'sparepart_id' => 'nullable|integer',
         ]);
 
         $transaction = DB::table('transactions')->where('id', $id)->first();
 
         if (!$transaction || $transaction->status !== 'pending') {
             return redirect()->back()->with('error', 'Transaksi tidak ditemukan atau sudah diproses.');
+        }
+
+        $detailsQuery = DB::table('transaction_details')
+            ->where('transaction_id', $id)
+            ->whereNull('proof_image_url');
+
+        if ($request->filled('sparepart_id')) {
+            $detailsQuery->where('sparepart_id', $request->sparepart_id);
+        }
+
+        $details = $detailsQuery->orderBy('id')->get();
+
+        if ($details->isEmpty()) {
+            return redirect()->back()->with('error', 'Item transaksi tidak ditemukan atau sudah diproses.');
+        }
+
+        if ($request->action === 'verify') {
+            $request->validate([
+                'proofs.0.before' => 'required|array|min:1',
+                'proofs.0.before.*' => 'required|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'proofs.0.after' => 'required|array|min:1',
+                'proofs.0.after.*' => 'required|file|mimes:jpeg,png,jpg,pdf|max:5120',
+            ], [
+                'proofs.0.before.required' => 'Foto sebelum pemasangan wajib diunggah.',
+                'proofs.0.before.*.mimes' => 'Format foto sebelum harus JPEG, PNG, JPG, atau PDF.',
+                'proofs.0.after.required' => 'Foto sesudah pemasangan wajib diunggah.',
+                'proofs.0.after.*.mimes' => 'Format foto sesudah harus JPEG, PNG, JPG, atau PDF.',
+            ]);
         }
 
         try {
@@ -199,49 +293,61 @@ class TransactionController extends Controller
                 if (auth()->user()->role !== 'supervisor') {
                     return redirect()->back()->with('error', 'Only Supervisor can cancel transactions.');
                 }
-                $details = DB::table('transaction_details')->where('transaction_id', $id)->get();
                 foreach ($details as $detail) {
                     DB::table('spareparts')->where('id', $detail->sparepart_id)->increment('current_stock', $detail->qty);
                 }
-                DB::table('transactions')->where('id', $id)->update([
-                    'status'     => 'canceled', 
-                    'updated_at' => now()->timezone('Asia/Jakarta')
-                ]);
-                $msg = 'Transaction canceled. Stock returned.';
+                DB::table('transaction_details')->whereIn('id', $details->pluck('id'))->delete();
+
+                $remainingCount = DB::table('transaction_details')->where('transaction_id', $id)->count();
+                $remainingPending = DB::table('transaction_details')->where('transaction_id', $id)->whereNull('proof_image_url')->count();
+
+                if ($remainingCount === 0) {
+                    DB::table('transactions')->where('id', $id)->update([
+                        'status'     => 'canceled',
+                        'updated_at' => now()->timezone('Asia/Jakarta')
+                    ]);
+                } elseif ($remainingPending === 0) {
+                    DB::table('transactions')->where('id', $id)->update([
+                        'status'     => 'completed',
+                        'updated_at' => now()->timezone('Asia/Jakarta')
+                    ]);
+                }
+                $msg = 'Item canceled. Stock returned.';
             } else {
-                $destinationPath = public_path("uploads/installations");
-                if (!\Illuminate\Support\Facades\File::exists($destinationPath)) {
-                    \Illuminate\Support\Facades\File::makeDirectory($destinationPath, 0755, true);
-                }
+                $beforePaths = collect($request->file('proofs.0.before', []))
+                    ->map(fn ($file) => $file->store('installations', 'local'))
+                    ->values()
+                    ->all();
+                $afterPaths = collect($request->file('proofs.0.after', []))
+                    ->map(fn ($file) => $file->store('installations', 'local'))
+                    ->values()
+                    ->all();
 
-                // 1. Upload Foto SEBELUM (Before)
-                $proofBeforePath = null;
-                if ($request->hasFile('proof_image_before')) {
-                    $fileBefore = $request->file('proof_image_before');
-                    $extBefore = $fileBefore->getClientOriginalExtension();
-                    $filenameBefore = time() . '_before_' . $transaction->vehicle_id . '_' . \Illuminate\Support\Str::random(4) . '.' . $extBefore;
-                    $fileBefore->move($destinationPath, $filenameBefore);
-                    $proofBeforePath = "uploads/installations/" . $filenameBefore;
-                }
+                $beforeValue = count($beforePaths) === 1 ? $beforePaths[0] : json_encode($beforePaths);
+                $afterValue = count($afterPaths) === 1 ? $afterPaths[0] : json_encode($afterPaths);
 
-                // 2. Upload Foto SESUDAH (After)
-                $proofPath = null;
-                if ($request->hasFile('proof_image')) {
-                    $file = $request->file('proof_image');
-                    $ext = $file->getClientOriginalExtension();
-                    $filename = time() . '_install_' . $transaction->vehicle_id . '_' . \Illuminate\Support\Str::random(4) . '.' . $ext;
-                    $file->move($destinationPath, $filename);
-                    $proofPath = "uploads/installations/" . $filename;
-                }
+                DB::table('transaction_details')
+                    ->whereIn('id', $details->pluck('id'))
+                    ->update([
+                        'proof_image_before_url' => $beforeValue,
+                        'proof_image_url' => $afterValue,
+                        'updated_at' => now()->timezone('Asia/Jakarta'),
+                    ]);
 
-                // 3. Simpan kedua path ke tabel transactions
-                DB::table('transactions')->where('id', $id)->update([
-                    'status'                 => 'completed', 
-                    'proof_image_before_url' => $proofBeforePath,
-                    'proof_image_url'        => $proofPath, 
-                    'updated_at'             => now()->timezone('Asia/Jakarta')
-                ]);
-                $msg = 'Proof uploaded (Before & After). Transaction completed.';
+                $remainingPending = DB::table('transaction_details')
+                    ->where('transaction_id', $id)
+                    ->whereNull('proof_image_url')
+                    ->count();
+
+                if ($remainingPending === 0) {
+                    DB::table('transactions')->where('id', $id)->update([
+                        'status' => 'completed',
+                        'updated_at' => now()->timezone('Asia/Jakarta')
+                    ]);
+                    $msg = 'Proofs uploaded (Before & After). Transaction completed.';
+                } else {
+                    $msg = 'Item proofs uploaded (Before & After). Remaining items are still pending.';
+                }
             }
 
             DB::commit();
@@ -494,15 +600,24 @@ class TransactionController extends Controller
             'date' => 'required|date',
             'vehicle_id' => 'required|exists:vehicles,id',
             'requester_name' => 'required|string|max:100',
-            'sparepart_id' => 'required|exists:spareparts,id',
-            'qty' => 'required|integer|min:1',
+            'items' => 'required|array|min:1',
+            'items.*.id' => 'required|exists:spareparts,id',
+            'items.*.qty' => 'required|integer|min:1',
         ]);
 
-        $part = DB::table('spareparts')->where('id', $request->sparepart_id)->first();
         $vehicle = DB::table('vehicles')->where('id', $request->vehicle_id)->first();
+        $partsById = DB::table('spareparts')
+            ->whereIn('id', collect($request->items)->pluck('id'))
+            ->get()
+            ->keyBy('id');
 
-        if ($part->current_stock < $request->qty) {
-            return redirect()->back()->with('error', "Part stock insufficient! Available: {$part->current_stock}")->withInput();
+        foreach ($request->items as $item) {
+            $part = $partsById->get($item['id']);
+            if (!$part || $part->current_stock < $item['qty']) {
+                $available = $part ? $part->current_stock : 0;
+                $name = $part ? $part->description : 'Selected part';
+                return redirect()->back()->with('error', "Part stock insufficient for {$name}! Available: {$available}")->withInput();
+            }
         }
 
         if ($request->force_submit != '1') {
@@ -511,7 +626,7 @@ class TransactionController extends Controller
                 ->join('transaction_details', 'transactions.id', '=', 'transaction_details.transaction_id')
                 ->where('transactions.type', 'OUT')
                 ->where('transactions.vehicle_id', $request->vehicle_id)
-                ->where('transaction_details.sparepart_id', $request->sparepart_id)
+                ->whereIn('transaction_details.sparepart_id', collect($request->items)->pluck('id'))
                 ->where('transactions.date', '>=', $fiveDaysAgo)
                 ->whereIn('transactions.status', ['completed', 'pending'])
                 ->first();
@@ -538,19 +653,26 @@ class TransactionController extends Controller
                 'updated_at' => now()->timezone('Asia/Jakarta'),
             ]);
 
-            DB::table('transaction_details')->insert([
-                'transaction_id' => $transactionId,
-                'sparepart_id' => $request->sparepart_id,
-                'qty' => $request->qty,
-                'created_at' => now()->timezone('Asia/Jakarta'),
-                'updated_at' => now()->timezone('Asia/Jakarta'),
-            ]);
+            $partNames = [];
+            foreach ($request->items as $item) {
+                DB::table('transaction_details')->insert([
+                    'transaction_id' => $transactionId,
+                    'sparepart_id' => $item['id'],
+                    'qty' => $item['qty'],
+                    'created_at' => now()->timezone('Asia/Jakarta'),
+                    'updated_at' => now()->timezone('Asia/Jakarta'),
+                ]);
 
-            DB::table('spareparts')->where('id', $request->sparepart_id)->decrement('current_stock', $request->qty);
+                DB::table('spareparts')->where('id', $item['id'])->decrement('current_stock', $item['qty']);
+                $part = $partsById->get($item['id']);
+                if ($part) {
+                    $partNames[] = $part->description;
+                }
+            }
 
             $supervisors = User::where('role', 'supervisor')->get();
             $details = [
-                'part_name' => $part->description,
+                'part_name' => implode(', ', $partNames),
                 'fleet_number' => $vehicle->fleet_number,
                 'user_name' => auth()->user()->name,
             ];

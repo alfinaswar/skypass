@@ -128,62 +128,76 @@
                     </div>
                 </div>
 
-                <!-- BAGIAN 2: ITEM (BUKTI DIHAPUS DARI SINI) -->
+                <!-- BAGIAN 2: ITEM LIST -->
                 <div class="bg-white p-6 rounded-lg shadow-sm border-t-4 border-green-600 mb-8">
                     <h3 class="text-xl font-bold text-gray-900 mb-6 border-b-2 border-green-600 pb-2">
-                        Sparepart Selection
+                        Item List
                     </h3>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        
-                        <!-- Kiri: Pencarian Sparepart -->
-                        <div>
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Search Sparepart</label>
-                            <div class="relative mb-4">
+                    <div class="flex flex-col md:flex-row gap-4 mb-6 items-end">
+                        <div class="w-full md:w-1/2 relative">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Search Item</label>
+                            <div class="relative">
                                 <input type="text" id="part_search" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-700 focus:ring-blue-700 pl-10" placeholder="Type name or part number..." autocomplete="off">
                                 <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                     <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                                 </div>
-                                <!-- Dropdown Hasil Search -->
-                                <div id="search_results" class="absolute z-50 bg-white border border-gray-300 w-full mt-1 rounded-md shadow-lg hidden max-h-60 overflow-y-auto"></div>
                             </div>
+                            <div id="search_results" class="absolute z-50 bg-white border border-gray-300 w-full mt-1 rounded-md shadow-lg hidden max-h-60 overflow-y-auto"></div>
+                        </div>
 
-                            <!-- Preview Item Terpilih -->
-                            <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
-                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Selected Item</label>
-                                <input type="text" id="selected_part_display" class="w-full bg-transparent border-none p-0 text-gray-900 font-bold focus:ring-0" placeholder="No item selected" disabled value="{{ old('selected_display_name') }}">
-                                <input type="hidden" name="sparepart_id" id="selected_part_id" value="{{ old('sparepart_id') }}">
-                                <input type="hidden" name="selected_display_name" id="selected_display_name_hidden" value="{{ old('selected_display_name') }}">
+                        <div class="w-full md:w-1/4">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Selected Item</label>
+                            <input type="text" id="selected_part_name" disabled class="w-full rounded-md border-gray-200 bg-gray-100 text-gray-600" placeholder="No item selected">
+                            
+                            <!-- Hidden Fields for JS Logic -->
+                            <input type="hidden" id="selected_part_id"> 
+                            <input type="hidden" id="selected_part_number"> 
+                            <input type="hidden" id="selected_part_category"> 
+                        </div>
+
+                        <div class="w-full md:w-1/6">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Qty</label>
+                            <div class="flex">
+                                <input type="number" id="input_qty" min="1" class="w-full rounded-l-md border-gray-300 shadow-sm focus:border-blue-700 focus:ring-blue-700" placeholder="0">
+                                <span id="unit_display" class="inline-flex items-center px-3 rounded-r-md border border-l-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">-</span>
                             </div>
                         </div>
 
-                        <!-- Kanan: Qty Only -->
-                        <div class="space-y-6">
-                            <!-- Qty -->
-                            <div>
-                                <label class="block text-sm font-bold text-gray-700 mb-2">Quantity</label>
-                                <div class="flex">
-                                    <input type="number" name="qty" id="input_qty" min="1" class="w-1/2 rounded-l-md border-gray-300 shadow-sm focus:border-blue-700 focus:ring-blue-700" placeholder="0" value="{{ old('qty') }}" required>
-                                    <span id="unit_display" class="inline-flex items-center px-4 rounded-r-md border border-l-0 border-gray-300 bg-gray-100 text-gray-500 text-sm font-bold w-1/2">
-                                        -
-                                    </span>
-                                </div>
+                        <div class="w-full md:w-auto">
+                            <button type="button" onclick="addItemToTable()" class="w-full px-6 py-2 bg-blue-700 text-white font-bold rounded-md hover:bg-blue-800 transition shadow-md">Add</button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto mb-6">
+                        <table class="min-w-full divide-y divide-gray-200 border">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Part Number</th>
+                                    <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Description</th>
+                                    <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Category</th>
+                                    <th class="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase">Qty</th>
+                                    <th class="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="items_table_body" class="bg-white divide-y divide-gray-200">
+                                <tr id="empty_row"><td colspan="5" class="px-6 py-10 text-center text-gray-500">No items added yet. Search and add items above.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- INFO BOX PENGGANTI UPLOAD -->
+                    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                                </svg>
                             </div>
-                            
-                            <!-- INFO BOX PENGGANTI UPLOAD -->
-                            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-                                <div class="flex">
-                                    <div class="flex-shrink-0">
-                                        <svg class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
-                                        </svg>
-                                    </div>
-                                    <div class="ml-3">
-                                        <p class="text-sm text-blue-700">
-                                            Note: This transaction will be saved as <strong>Pending</strong>. Proof of installation will be required later in the <strong>Pending Issues</strong> menu.
-                                        </p>
-                                    </div>
-                                </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-blue-700">
+                                    Note: This transaction will be saved as <strong>Pending</strong>. Proof of installation will be required later in the <strong>Pending Issues</strong> menu.
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -356,18 +370,100 @@
         });
 
         function selectItem(item) {
-            // Fill Hidden ID & Display Name
+            document.getElementById('selected_part_name').value = item.description;
             document.getElementById('selected_part_id').value = item.id;
-            
-            const displayText = `${item.description} (${item.part_number || '-'})`;
-            document.getElementById('selected_part_display').value = displayText;
-            document.getElementById('selected_display_name_hidden').value = displayText; 
-            
+            document.getElementById('selected_part_number').value = item.part_number || '-';
+            document.getElementById('selected_part_category').value = item.category || '';
+
             document.getElementById('unit_display').textContent = item.unit;
-            document.getElementById('input_qty').focus(); 
-            
+            document.getElementById('input_qty').focus();
+
             searchInput.value = '';
             resultsBox.classList.add('hidden');
+        }
+
+        let cartItems = [];
+
+        function addItemToTable() {
+            const id = document.getElementById('selected_part_id').value;
+            const name = document.getElementById('selected_part_name').value;
+            const qty = parseInt(document.getElementById('input_qty').value);
+            const unit = document.getElementById('unit_display').textContent;
+            const partNumber = document.getElementById('selected_part_number').value;
+            const category = document.getElementById('selected_part_category').value;
+
+            if (!id || !qty || qty <= 0) {
+                alert("Please select an item and enter valid quantity.");
+                return;
+            }
+
+            const existingItemIndex = cartItems.findIndex(item => item.id === id);
+
+            if (existingItemIndex !== -1) {
+                cartItems[existingItemIndex].qty = parseInt(cartItems[existingItemIndex].qty) + qty;
+            } else {
+                cartItems.push({ id, name, qty, unit, partNumber, category });
+            }
+
+            renderTable();
+            resetInputArea();
+        }
+
+        function removeItem(index) {
+            cartItems.splice(index, 1);
+            renderTable();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('items_table_body');
+            tbody.innerHTML = '';
+
+            if (cartItems.length === 0) {
+                tbody.innerHTML = `<tr id="empty_row"><td colspan="5" class="px-6 py-10 text-center text-gray-500">No items added yet. Search and add items above.</td></tr>`;
+                return;
+            }
+
+            cartItems.forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-gray-50";
+
+                let categoryBadge = '';
+                if (item.category === 'rotating') {
+                    categoryBadge = '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Rotating</span>';
+                } else {
+                    categoryBadge = '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">Consumable</span>';
+                }
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4 text-sm text-gray-500 font-mono">
+                        <input type="hidden" name="items[${index}][id]" value="${item.id}">
+                        ${item.partNumber}
+                    </td>
+                    <td class="px-6 py-4 text-sm font-bold text-gray-900">${item.name}</td>
+                    <td class="px-6 py-4 text-sm">
+                        ${categoryBadge}
+                    </td>
+                    <td class="px-6 py-4 text-center text-sm font-bold text-blue-700">
+                        ${item.qty} <span class="text-gray-400 font-normal text-xs">${item.unit}</span>
+                        <input type="hidden" name="items[${index}][qty]" value="${item.qty}">
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <button type="button" onclick="removeItem(${index})" class="text-red-600 hover:text-red-900 font-bold text-sm">Remove</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function resetInputArea() {
+            document.getElementById('selected_part_name').value = '';
+            document.getElementById('selected_part_id').value = '';
+            document.getElementById('input_qty').value = '';
+            document.getElementById('unit_display').textContent = '-';
+            document.getElementById('selected_part_number').value = '';
+            document.getElementById('selected_part_category').value = '';
+
+            searchInput.focus();
         }
 
         // --- 2. FORCE SUBMIT (5 DAYS RULE) ---
@@ -389,12 +485,10 @@
                 return false;
             }
 
-            const selectedPartId = document.getElementById('selected_part_id').value;
-            
-            if (!selectedPartId || selectedPartId === '') {
-                alert('Warning! No parts selected for submission. Please select minimum of 1 sparepart to proceed');
-                document.getElementById('part_search').focus(); // Fokuskan kursor ke kotak pencarian
-                return false; // Batalkan proses submit
+            if (cartItems.length === 0) {
+                alert('Warning! No parts added for submission. Please add minimum of 1 sparepart to proceed.');
+                document.getElementById('part_search').focus();
+                return false;
             }
             
             return true; // Lanjutkan submit jika sudah dipilih
