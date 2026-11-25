@@ -144,7 +144,7 @@
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             @forelse ($transactions as $trx)
-                                @php($details = $transactionDetails->get($trx->id, collect()))
+                                @php $details = $transactionDetails->get($trx->id, collect()); @endphp
                                 <tr class="transition-colors {{ $trx->status === 'canceled' ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50' }}">
                                     <!-- BARU: Checkbox Row -->
                                     @if($tab === 'OUT')
@@ -228,6 +228,8 @@
                                                         @php
                                                             $beforeList = $detail->proof_image_before_url ? (str_starts_with(trim($detail->proof_image_before_url), '[') ? (json_decode($detail->proof_image_before_url, true) ?? [$detail->proof_image_before_url]) : [$detail->proof_image_before_url]) : [];
                                                             $afterList = $detail->proof_image_url ? (str_starts_with(trim($detail->proof_image_url), '[') ? (json_decode($detail->proof_image_url, true) ?? [$detail->proof_image_url]) : [$detail->proof_image_url]) : [];
+                                                            $beforeItems = collect($beforeList)->values()->map(fn($p, $i) => ['url' => route('transactions.proof', ['detail' => $detail->id, 'type' => 'before', 'index' => $i]), 'isPdf' => str_ends_with(strtolower($p), '.pdf')])->all();
+                                                            $afterItems = collect($afterList)->values()->map(fn($p, $i) => ['url' => route('transactions.proof', ['detail' => $detail->id, 'type' => 'after', 'index' => $i]), 'isPdf' => str_ends_with(strtolower($p), '.pdf')])->all();
                                                         @endphp
                                                         <tr>
                                                             <td class="px-4 py-2 font-medium text-gray-900">{{ $detail->part_name }}</td>
@@ -235,23 +237,19 @@
                                                             <td class="px-4 py-2 text-right font-semibold">{{ $detail->qty }} {{ $detail->unit }}</td>
                                                             @if($tab === 'OUT')
                                                                 <td class="px-4 py-2 text-center">
-                                                                    @if(count($beforeList) > 0)
-                                                                        <div class="flex flex-wrap justify-center gap-1.5">
-                                                                            @foreach($beforeList as $idx => $path)
-                                                                                <a href="{{ route('transactions.proof', ['detail' => $detail->id, 'type' => 'before', 'index' => $idx]) }}" target="_blank" class="text-amber-700 underline">{{ count($beforeList) > 1 ? 'Before ' . ($idx + 1) : 'Lihat Before' }}</a>
-                                                                            @endforeach
-                                                                        </div>
+                                                                    @if(count($beforeItems) > 0)
+                                                                        <button type="button" onclick='openProofModal(@json($detail->part_name), "Before", @json($beforeItems))' class="text-amber-700 hover:text-amber-900 font-semibold underline">
+                                                                            Lihat Before{{ count($beforeItems) > 1 ? ' (' . count($beforeItems) . ')' : '' }}
+                                                                        </button>
                                                                     @else
                                                                         <span class="text-gray-400">-</span>
                                                                     @endif
                                                                 </td>
                                                                 <td class="px-4 py-2 text-center">
-                                                                    @if(count($afterList) > 0)
-                                                                        <div class="flex flex-wrap justify-center gap-1.5">
-                                                                            @foreach($afterList as $idx => $path)
-                                                                                <a href="{{ route('transactions.proof', ['detail' => $detail->id, 'type' => 'after', 'index' => $idx]) }}" target="_blank" class="text-blue-700 underline">{{ count($afterList) > 1 ? 'After ' . ($idx + 1) : 'Lihat After' }}</a>
-                                                                            @endforeach
-                                                                        </div>
+                                                                    @if(count($afterItems) > 0)
+                                                                        <button type="button" onclick='openProofModal(@json($detail->part_name), "After", @json($afterItems))' class="text-blue-700 hover:text-blue-900 font-semibold underline">
+                                                                            Lihat After{{ count($afterItems) > 1 ? ' (' . count($afterItems) . ')' : '' }}
+                                                                        </button>
                                                                     @else
                                                                         <span class="text-gray-400">-</span>
                                                                     @endif
@@ -283,6 +281,20 @@
                 <div class="px-6 py-4 bg-gray-50 border-t border-gray-200">
                     {{ $transactions->withQueryString()->links() }} 
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PREVIEW PROOF (BEFORE / AFTER) -->
+    <div id="proofGalleryModal" class="fixed inset-0 z-50 hidden bg-black bg-opacity-60 flex items-center justify-center p-4" onclick="if (event.target === this) closeProofModal()">
+        <div class="bg-white rounded-lg shadow-xl w-full p-6" style="max-width: 56rem;">
+            <div class="flex items-center justify-between border-b border-gray-200 pb-3 mb-4">
+                <h3 id="proofGalleryTitle" class="text-lg font-bold text-gray-900">Proof Photos</h3>
+                <button type="button" onclick="closeProofModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none font-bold">&times;</button>
+            </div>
+            <div id="proofGalleryGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; max-height: 70vh; overflow-y: auto;"></div>
+            <div class="mt-5 flex justify-end">
+                <button type="button" onclick="closeProofModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 font-semibold transition">Close</button>
             </div>
         </div>
     </div>
@@ -385,6 +397,49 @@
 
         function closeBastModal() {
             document.getElementById('bastModal').classList.add('hidden');
+        }
+
+        function openProofModal(partName, label, items) {
+            document.getElementById('proofGalleryTitle').textContent = `Foto ${label} — ${partName}`;
+            const grid = document.getElementById('proofGalleryGrid');
+            grid.innerHTML = '';
+
+            items.forEach((item, idx) => {
+                const link = document.createElement('a');
+                link.href = item.url;
+                link.target = '_blank';
+                link.className = 'block border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:border-blue-600 transition shadow-sm';
+
+                if (item.isPdf) {
+                    const pdfBox = document.createElement('div');
+                    pdfBox.className = 'flex flex-col items-center justify-center bg-red-50 text-red-700 font-bold text-sm';
+                    pdfBox.style.height = '180px';
+                    pdfBox.textContent = `PDF ${idx + 1}`;
+                    link.appendChild(pdfBox);
+                } else {
+                    const img = document.createElement('img');
+                    img.src = item.url;
+                    img.alt = `${label} ${idx + 1}`;
+                    img.style.width = '100%';
+                    img.style.height = '180px';
+                    img.style.objectFit = 'cover';
+                    link.appendChild(img);
+                }
+
+                const caption = document.createElement('div');
+                caption.className = 'px-2 py-1.5 text-xs text-center text-gray-700 font-semibold bg-white border-t border-gray-100';
+                caption.textContent = `${label} ${idx + 1}`;
+                link.appendChild(caption);
+
+                grid.appendChild(link);
+            });
+
+            document.getElementById('proofGalleryModal').classList.remove('hidden');
+        }
+
+        function closeProofModal() {
+            document.getElementById('proofGalleryModal').classList.add('hidden');
+            document.getElementById('proofGalleryGrid').innerHTML = '';
         }
     </script>
 </x-app-layout>
