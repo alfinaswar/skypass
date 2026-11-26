@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use ZipArchive;
 
 class AdminController extends Controller
@@ -213,51 +214,127 @@ class AdminController extends Controller
 
     public function restoreBackup(Request $request)
     {
-            if (auth()->user()->role !== 'supervisor') abort(403);
+        if (auth()->user()->role !== 'supervisor') abort(403);
 
-            $request->validate([
-                'backup_file' => 'required|file|mimes:zip|max:51200', // Max 50MB
-            ]);
+        $request->validate([
+            'backup_file' => 'required|file|mimes:zip|max:512000', // Max 500MB
+        ]);
 
-            $zipPath = $request->file('backup_file')->path();
-            $zip = new ZipArchive;
+        $zipPath = $request->file('backup_file')->path();
+        $zip = new ZipArchive;
 
-            if ($zip->open($zipPath) === TRUE) {
-                // Buat folder transit sementara di storage
-                $tempDir = storage_path('app/temp_restore_' . time());
-                File::makeDirectory($tempDir, 0755, true, true);
-                
-                try {
-                    // 1. Ekstrak ke folder transit
-                    $zip->extractTo($tempDir);
-                    $zip->close();
+        if ($zip->open($zipPath) === TRUE) {
+            $tempDir = storage_path('app/temp_restore_' . time());
+            File::makeDirectory($tempDir, 0755, true, true);
 
-                    // 2. Pindahkan Database ke lokasi yang benar (database/database.sqlite)
-                    $tempDbPath = $tempDir . '/database.sqlite';
-                    if (File::exists($tempDbPath)) {
+            try {
+                // 1. Ekstrak ke folder transit
+                $zip->extractTo($tempDir);
+                $zip->close();
+
+                $connection = config('database.default');
+                $tempJsonPath = $tempDir . '/database_backup.json';
+                $tempDbPath = $tempDir . '/database.sqlite';
+
+                // 2. Restore Database (otomatis deteksi JSON MySQL atau SQLite lama)
+                if (File::exists($tempJsonPath)) {
+                    $dump = json_decode(File::get($tempJsonPath), true);
+                    if (!is_array($dump)) {
+                        throw new \RuntimeException('Invalid database_backup.json format.');
+                    }
+                    $this->importTableDataToActiveDb($dump, $connection);
+                } elseif (File::exists($tempDbPath)) {
+                    if ($connection === 'sqlite') {
                         File::copy($tempDbPath, database_path('database.sqlite'));
-                    }
+                    } else {
+                        if (!extension_loaded('pdo_sqlite')) {
+                            throw new \RuntimeException('Ekstensi PHP pdo_sqlite tidak aktif di server untuk membaca backup SQLite.');
+                        }
+                        $sqlitePdo = new \PDO('sqlite:' . $tempDbPath);
+                        $sqlitePdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+                        $tables = $sqlitePdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'migrations'")->fetchAll(\PDO::FETCH_COLUMN);
 
-                    // 3. Pindahkan folder uploads ke public/uploads
-                    $tempUploadsPath = $tempDir . '/uploads';
-                    if (File::exists($tempUploadsPath)) {
-                        File::copyDirectory($tempUploadsPath, public_path('uploads'));
+                        $dump = [];
+                        foreach ($tables as $table) {
+                            $stmt = $sqlitePdo->query("SELECT * FROM \"{$table}\"");
+                            $dump[$table] = $stmt ? $stmt->fetchAll(\PDO::FETCH_ASSOC) : [];
+                        }
+                        $this->importTableDataToActiveDb($dump, $connection);
                     }
-
-                    // 4. Bersihkan folder transit
-                    File::deleteDirectory($tempDir);
-
-                    return redirect()->route('admin.index', ['tab' => 'backup'])
-                                    ->with('success', 'System Restored Successfully! All database records and images have been recovered.');
-                } catch (\Exception $e) {
-                    // Jika error, bersihkan folder transit
-                    if (File::exists($tempDir)) {
-                        File::deleteDirectory($tempDir);
-                    }
-                    return redirect()->back()->with('error', 'Failed to extract backup: ' . $e->getMessage());
                 }
-            } else {
-                return redirect()->back()->with('error', 'Invalid ZIP file.');
+
+                // 3. Pindahkan folder uploads & installations
+                $tempUploadsPath = $tempDir . '/uploads';
+                if (File::exists($tempUploadsPath)) {
+                    File::copyDirectory($tempUploadsPath, public_path('uploads'));
+                }
+
+                $tempInstallationsPath = $tempDir . '/installations';
+                if (File::exists($tempInstallationsPath)) {
+                    $targetInstallations = storage_path('app/private/installations');
+                    File::makeDirectory($targetInstallations, 0755, true, true);
+                    File::copyDirectory($tempInstallationsPath, $targetInstallations);
+                }
+
+                // 4. Bersihkan folder transit
+                File::deleteDirectory($tempDir);
+
+                return redirect()->route('admin.index', ['tab' => 'backup'])
+                    ->with('success', 'System Restored Successfully! All database records and images have been recovered.');
+            } catch (\Exception $e) {
+                if (File::exists($tempDir)) {
+                    File::deleteDirectory($tempDir);
+                }
+                return redirect()->back()->with('error', 'Restore Failed: ' . $e->getMessage());
             }
+        }
+
+        return redirect()->back()->with('error', 'Failed to open ZIP file. Make sure it is a valid backup archive.');
+    }
+
+    private function importTableDataToActiveDb(array $dump, string $connection): void
+    {
+        if ($connection === 'sqlite') {
+            DB::statement('PRAGMA foreign_keys = OFF');
+        } else {
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+        }
+
+        try {
+            foreach ($dump as $table => $rows) {
+                if ($table === 'migrations' || !Schema::hasTable($table)) {
+                    continue;
+                }
+
+                if ($connection === 'sqlite') {
+                    DB::table($table)->delete();
+                } else {
+                    DB::table($table)->truncate();
+                }
+
+                if (empty($rows)) {
+                    continue;
+                }
+
+                $validColumns = array_flip(Schema::getColumnListing($table));
+                $filteredRows = [];
+                foreach ($rows as $row) {
+                    $filtered = array_intersect_key((array) $row, $validColumns);
+                    if (!empty($filtered)) {
+                        $filteredRows[] = $filtered;
+                    }
+                }
+
+                foreach (array_chunk($filteredRows, 200) as $chunk) {
+                    DB::table($table)->insert($chunk);
+                }
+            }
+        } finally {
+            if ($connection === 'sqlite') {
+                DB::statement('PRAGMA foreign_keys = ON');
+            } else {
+                DB::statement('SET FOREIGN_KEY_CHECKS=1');
+            }
+        }
     }
 }

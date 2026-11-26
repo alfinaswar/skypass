@@ -205,7 +205,7 @@
                                 <form action="{{ route('admin.index') }}" method="GET" class="w-full md:w-auto flex items-center gap-2" style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem;">
                                     <input type="hidden" name="tab" value="transactions">
                                     <select name="trx_type" onchange="this.form.submit()" class="rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 text-sm" style="width: auto; flex-shrink: 0;">
-                                        <option value="" {{ request('trx_type') === null || request('trx_type') === '' ? 'selected' : '' }}>All (GI & GR)</option>
+                                        <option value="" {{ request('trx_type') === null || request('trx_type') === '' ? 'selected' : '' }}>All</option>
                                         <option value="GI" {{ request('trx_type') === 'GI' ? 'selected' : '' }}>Good Issue (GI)</option>
                                         <option value="GR" {{ request('trx_type') === 'GR' ? 'selected' : '' }}>Good Receipt (GR)</option>
                                     </select>
@@ -300,7 +300,7 @@
                                     <h3 class="text-lg font-bold text-green-800">1. Backup Data</h3>
                                 </div>
                                 <p class="text-sm text-green-700 mb-6 flex-grow">
-                                    Download a complete copy of the database (.sqlite) and all uploaded images (BAST, Proofs). Save this ZIP file safely in a secure location (e.g., Google Drive or External HDD).
+                                    Download a complete copy of the database (MySQL / SQLite) and all uploaded images (BAST, Proofs). Save this ZIP file safely in a secure location (e.g., Google Drive or External HDD).
                                 </p>
                                 <a href="{{ route('backup.download') }}" class="inline-flex justify-center items-center w-full px-6 py-3 bg-green-700 text-white font-bold rounded-md hover:bg-green-800 shadow-md transition">
                                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>

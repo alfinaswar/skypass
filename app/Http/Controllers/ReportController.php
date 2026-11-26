@@ -192,30 +192,47 @@ class ReportController extends Controller
         $zip = new ZipArchive;
 
         if ($zip->open($zipPath, ZipArchive::CREATE) === TRUE) {
-            
-            // 1. Masukkan Database SQLite
-            $dbPath = database_path('database.sqlite');
-            if (file_exists($dbPath)) {
-                $zip->addFile($dbPath, 'database.sqlite');
+            $connection = config('database.default');
+
+            // 1. Masukkan Database (otomatis SQLite atau MySQL/MariaDB)
+            if ($connection === 'sqlite') {
+                $dbPath = database_path('database.sqlite');
+                if (file_exists($dbPath)) {
+                    $zip->addFile($dbPath, 'database.sqlite');
+                }
+            } else {
+                $tables = collect(DB::select('SHOW TABLES'))
+                    ->map(fn ($row) => array_values((array) $row)[0])
+                    ->reject(fn ($table) => $table === 'migrations')
+                    ->values();
+
+                $dump = [];
+                foreach ($tables as $table) {
+                    $dump[$table] = DB::table($table)->get()->map(fn ($row) => (array) $row)->all();
+                }
+
+                $zip->addFromString('database_backup.json', json_encode($dump, JSON_UNESCAPED_UNICODE));
             }
 
-            // 2. Masukkan Folder Uploads (Gambar) secara Rekursif
-            $uploadPath = public_path('uploads');
-            if (File::exists($uploadPath)) {
-                $files = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($uploadPath),
-                    RecursiveIteratorIterator::LEAVES_ONLY
-                );
+            // 2. Masukkan Folder Uploads & Installation Proofs secara Rekursif
+            $folders = [
+                'uploads' => public_path('uploads'),
+                'installations' => storage_path('app/private/installations'),
+            ];
 
-                foreach ($files as $name => $file) {
-                    // Skip directories (they would be added automatically)
-                    if (!$file->isDir()) {
-                        // Get real and relative path for current file
-                        $filePath = $file->getRealPath();
-                        $relativePath = 'uploads/' . substr($filePath, strlen($uploadPath) + 1);
+            foreach ($folders as $zipPrefix => $folderPath) {
+                if (File::exists($folderPath)) {
+                    $files = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator($folderPath),
+                        RecursiveIteratorIterator::LEAVES_ONLY
+                    );
 
-                        // Add current file to archive
-                        $zip->addFile($filePath, $relativePath);
+                    foreach ($files as $file) {
+                        if (!$file->isDir()) {
+                            $filePath = $file->getRealPath();
+                            $relativePath = $zipPrefix . '/' . ltrim(str_replace('\\', '/', substr($filePath, strlen($folderPath))), '/');
+                            $zip->addFile($filePath, $relativePath);
+                        }
                     }
                 }
             }
