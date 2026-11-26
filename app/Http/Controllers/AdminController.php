@@ -36,12 +36,21 @@ class AdminController extends Controller
         elseif ($tab === 'transactions') {
             // Ambil list transaksi untuk dihapus
             $query = DB::table('transactions');
+
+            // Filter Good Issue (GI) / Good Receipt (GR) berdasarkan prefix invoice_no
+            if ($request->get('trx_type') === 'GI') {
+                $query->where('invoice_no', 'like', 'GI%');
+            } elseif ($request->get('trx_type') === 'GR') {
+                $query->where('invoice_no', 'like', 'GR%');
+            }
             
             // Search logic untuk transaksi
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query->where('invoice_no', 'like', "%{$search}%")
+                $query->where(function ($q) use ($search) {
+                    $q->where('invoice_no', 'like', "%{$search}%")
                       ->orWhere('purchase_order', 'like', "%{$search}%");
+                });
             }
 
             $transactions = $query->orderBy('created_at', 'desc')->paginate(15)->withQueryString();

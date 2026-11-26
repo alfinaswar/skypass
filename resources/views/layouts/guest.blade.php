@@ -25,7 +25,7 @@
             <!-- Logo & Header Text Wrapper -->
             <div class="text-center">
                 <a href="/" class="inline-block">
-                    <x-application-logo class="w-72 h-auto fill-current text-gray-500 mx-auto" />
+                    <img src="{{ asset('images/Stockx.in logo.gif') }}" alt="Stockx.in Logo" class="w-72 h-auto mx-auto" />
                 </a>
                 
                 <!-- Teks Petunjuk Login -->

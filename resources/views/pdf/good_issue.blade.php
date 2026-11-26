@@ -172,38 +172,99 @@
         <div class="clear"></div>
     </div>
 
+    @php
+        $resolveProofFiles = function ($rawValue) {
+            if (empty($rawValue)) {
+                return [];
+            }
+            $trimmed = trim((string) $rawValue);
+            $paths = str_starts_with($trimmed, '[') ? (json_decode($trimmed, true) ?? [$trimmed]) : [$trimmed];
+            $resolved = [];
+            foreach ($paths as $path) {
+                if (!is_string($path) || $path === '' || str_ends_with(strtolower($path), '.pdf')) {
+                    continue;
+                }
+                if (\Illuminate\Support\Facades\Storage::disk('local')->exists($path)) {
+                    $resolved[] = \Illuminate\Support\Facades\Storage::disk('local')->path($path);
+                } elseif (file_exists(public_path($path))) {
+                    $resolved[] = public_path($path);
+                }
+            }
+            return $resolved;
+        };
+    @endphp
+
     @foreach($transactions as $trx)
         @php
-            $hasBefore = !empty($trx->proof_image_before_url) && file_exists(public_path($trx->proof_image_before_url));
-            $hasAfter = !empty($trx->proof_image_url) && file_exists(public_path($trx->proof_image_url));
+            $trxDetails = $details->where('transaction_id', $trx->id);
+            $fleetNo = $trx->fleet_number ?? '-';
+            $attachments = [];
+
+            if ($trxDetails->isNotEmpty()) {
+                foreach ($trxDetails as $detail) {
+                    $beforeFiles = $resolveProofFiles($detail->proof_image_before_url);
+                    if (empty($beforeFiles)) {
+                        $beforeFiles = $resolveProofFiles($trx->proof_image_before_url);
+                    }
+                    $afterFiles = $resolveProofFiles($detail->proof_image_url);
+                    if (empty($afterFiles)) {
+                        $afterFiles = $resolveProofFiles($trx->proof_image_url);
+                    }
+                    if (!empty($beforeFiles) || !empty($afterFiles)) {
+                        $attachments[] = (object) [
+                            'description' => $detail->description,
+                            'qty' => $detail->qty . ' ' . $detail->unit,
+                            'beforeFiles' => $beforeFiles,
+                            'afterFiles' => $afterFiles,
+                        ];
+                    }
+                }
+            } else {
+                $beforeFiles = $resolveProofFiles($trx->proof_image_before_url);
+                $afterFiles = $resolveProofFiles($trx->proof_image_url);
+                if (!empty($beforeFiles) || !empty($afterFiles)) {
+                    $attachments[] = (object) [
+                        'description' => 'Sparepart',
+                        'qty' => '',
+                        'beforeFiles' => $beforeFiles,
+                        'afterFiles' => $afterFiles,
+                    ];
+                }
+            }
         @endphp
 
-        @if($hasBefore || $hasAfter)
-            @php
-                $matchedDetail = $details->where('transaction_id', $trx->id)->first();
-                $partDescription = $matchedDetail ? $matchedDetail->description : 'Sparepart';
-                $itemQty = $matchedDetail ? $matchedDetail->qty . ' ' . $matchedDetail->unit : '';
-                $fleetNo = $trx->fleet_number ?? '-';
-            @endphp
-            
+        @foreach($attachments as $att)
             <div class="page-break"></div>
             <div class="text-center" style="margin-top: 10px;">
                 <div class="title font-bold" style="text-decoration: none; margin-bottom: 5px; font-size: 15px;">
-                    Lampiran Dokumentasi Pemasangan: {{ $partDescription }} pada {{ $fleetNo }}
+                    Lampiran Dokumentasi Pemasangan: {{ $att->description }} pada {{ $fleetNo }}
                 </div>
                 <div style="font-size: 11px; color: #555; margin-bottom: 12px;">
-                    Jumlah: {{ $itemQty }}
+                    Jumlah: {{ $att->qty }}
                 </div>
 
-                <!-- Layout Atas Bawah (Top & Bottom) dengan batasan tinggi agar pas 1 halaman -->
+                <!-- Layout Atas Bawah (Top & Bottom) dengan tabel agar rapi di DomPDF -->
                 <div style="width: 100%; text-align: center;">
                     <!-- FOTO SEBELUM -->
-                    <div style="margin-bottom: 10px;">
-                        <div class="font-bold" style="margin-bottom: 3px; color: #000; font-size: 12px;">1. FOTO SEBELUM PEMASANGAN</div>
-                        @if($hasBefore)
-                            <img src="{{ public_path($trx->proof_image_before_url) }}" style="max-width: 100%; max-height: 220px; border: 1px solid #ccc; padding: 2px; background: #fff;">
+                    <div style="margin-bottom: 14px;">
+                        <div class="font-bold" style="margin-bottom: 6px; color: #000; font-size: 12px;">1. FOTO SEBELUM PEMASANGAN</div>
+                        @if(!empty($att->beforeFiles))
+                            <table style="width: 100%; border-collapse: collapse; border: none;">
+                                @foreach(array_chunk($att->beforeFiles, 3) as $row)
+                                    <tr>
+                                        @foreach($row as $imgPath)
+                                            <td style="border: none; padding: 4px; text-align: center; vertical-align: top; width: {{ round(100 / min(3, count($att->beforeFiles)), 2) }}%;">
+                                                <img src="{{ $imgPath }}" style="display: block; margin: 0 auto; max-width: 100%; max-height: 180px; border: 1px solid #ccc; padding: 2px; background: #fff;">
+                                            </td>
+                                        @endforeach
+                                        @for($empty = count($row); $empty < min(3, count($att->beforeFiles)); $empty++)
+                                            <td style="border: none; padding: 4px;"></td>
+                                        @endfor
+                                    </tr>
+                                @endforeach
+                            </table>
                         @else
-                            <div style="height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; color: #999; font-style: italic; font-size: 11px;">
+                            <div style="height: 80px; border: 1px dashed #ccc; padding-top: 30px; color: #999; font-style: italic; font-size: 11px;">
                                 Tidak ada foto sebelum
                             </div>
                         @endif
@@ -211,18 +272,31 @@
 
                     <!-- FOTO SESUDAH -->
                     <div>
-                        <div class="font-bold" style="margin-bottom: 3px; color: #000; font-size: 12px;">2. FOTO SESUDAH PEMASANGAN</div>
-                        @if($hasAfter)
-                            <img src="{{ public_path($trx->proof_image_url) }}" style="max-width: 100%; max-height: 220px; border: 1px solid #ccc; padding: 2px; background: #fff;">
+                        <div class="font-bold" style="margin-bottom: 6px; color: #000; font-size: 12px;">2. FOTO SESUDAH PEMASANGAN</div>
+                        @if(!empty($att->afterFiles))
+                            <table style="width: 100%; border-collapse: collapse; border: none;">
+                                @foreach(array_chunk($att->afterFiles, 3) as $row)
+                                    <tr>
+                                        @foreach($row as $imgPath)
+                                            <td style="border: none; padding: 4px; text-align: center; vertical-align: top; width: {{ round(100 / min(3, count($att->afterFiles)), 2) }}%;">
+                                                <img src="{{ $imgPath }}" style="display: block; margin: 0 auto; max-width: 100%; max-height: 180px; border: 1px solid #ccc; padding: 2px; background: #fff;">
+                                            </td>
+                                        @endforeach
+                                        @for($empty = count($row); $empty < min(3, count($att->afterFiles)); $empty++)
+                                            <td style="border: none; padding: 4px;"></td>
+                                        @endfor
+                                    </tr>
+                                @endforeach
+                            </table>
                         @else
-                            <div style="height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; color: #999; font-style: italic; font-size: 11px;">
+                            <div style="height: 80px; border: 1px dashed #ccc; padding-top: 30px; color: #999; font-style: italic; font-size: 11px;">
                                 Tidak ada foto sesudah
                             </div>
                         @endif
                     </div>
                 </div>
             </div>
-        @endif
+        @endforeach
     @endforeach
 </body>
 </html>

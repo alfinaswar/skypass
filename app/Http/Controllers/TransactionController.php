@@ -85,8 +85,8 @@ class TransactionController extends Controller
             // Jika ada, tambah 1. Jika belum ada (tahun baru), mulai dari 1.
             $nextNumber = $sequence ? $sequence->last_number + 1 : 1;
             
-            // Rangkai string sesuai format: 001/PPNLH0102/MTC-KNO/2026-S0
-            $nextBastNumber = sprintf("%03d/PPNLH0102/MTC-KNO/%s-S0", $nextNumber, $currentYear);
+            // Rangkai string sesuai format: 001/PPNLH0102/MTC/2026-S0
+            $nextBastNumber = sprintf("%03d/PPNLH0102/MTC/%s-S0", $nextNumber, $currentYear);
         }
 
         return view('transactions.index', compact('transactions', 'transactionDetails', 'vehicles', 'tab', 'nextBastNumber'));
@@ -161,8 +161,8 @@ class TransactionController extends Controller
         
         // --- BARU: UPDATE COUNTER BAST JIKA FORMATNYA STANDAR ---
         // Mengecek apakah input user cocok persis dengan pola urutan kita (menggunakan Regex)
-        // Pola: Minimal 3 digit angka, diikuti /PPNLH0102/MTC-KNO/, lalu 4 digit tahun, lalu -S0
-        if (preg_match('/^(\d{3,})\/PPNLH0102\/MTC-KNO\/(\d{4})-S0$/', $bast_number, $matches)) {
+        // Pola: Minimal 3 digit angka, diikuti /PPNLH0102/MTC/, lalu 4 digit tahun, lalu -S0
+        if (preg_match('/^(\d{3,})\/PPNLH0102\/MTC(?:-KNO)?\/(\d{4})-S0$/', $bast_number, $matches)) {
             $submittedNum = (int)$matches[1]; // Ekstrak nomor urut
             $submittedYear = (int)$matches[2]; // Ekstrak tahun
 

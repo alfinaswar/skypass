@@ -201,17 +201,22 @@
                                     <h3 class="text-lg font-bold text-red-700">Delete Transactions</h3>
                                 </div>
                                 
-                                <!-- Search Transaksi -->
-                                <form action="{{ route('admin.index') }}" method="GET" class="w-full md:w-1/3 flex gap-2">
+                                <!-- Filter & Search Transaksi -->
+                                <form action="{{ route('admin.index') }}" method="GET" class="w-full md:w-auto flex items-center gap-2" style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem;">
                                     <input type="hidden" name="tab" value="transactions">
-                                    <div class="relative flex-grow">
+                                    <select name="trx_type" onchange="this.form.submit()" class="rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 text-sm" style="width: auto; flex-shrink: 0;">
+                                        <option value="" {{ request('trx_type') === null || request('trx_type') === '' ? 'selected' : '' }}>All (GI & GR)</option>
+                                        <option value="GI" {{ request('trx_type') === 'GI' ? 'selected' : '' }}>Good Issue (GI)</option>
+                                        <option value="GR" {{ request('trx_type') === 'GR' ? 'selected' : '' }}>Good Receipt (GR)</option>
+                                    </select>
+                                    <div class="relative flex-grow" style="flex: 1 1 auto; min-width: 200px;">
                                         <input type="text" name="search" value="{{ request('search') }}" placeholder="Search Invoice / PO..." 
                                             class="w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 text-sm pl-10">
                                         <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                             <svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                                         </div>
                                     </div>
-                                    <button type="submit" class="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700 text-sm font-bold shadow-sm">Search</button>
+                                    <button type="submit" class="px-4 py-2 bg-blue-700 text-white rounded-md hover:bg-blue-800 text-sm font-bold shadow-sm" style="flex-shrink: 0;">Search</button>
                                 </form>
                             </div>
 
