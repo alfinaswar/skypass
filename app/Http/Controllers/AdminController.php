@@ -385,7 +385,7 @@ class AdminController extends Controller
             $installationsBase = Storage::disk('local')->path('installations');
 
             for ($i = 0; $i < $zip->numFiles; $i++) {
-                $entryName = str_replace('\\', '/', $zip->getNameIndex($i));
+                $entryName = ltrim(str_replace('\\', '/', $zip->getNameIndex($i)), './');
                 if ($entryName === '' || str_ends_with($entryName, '/') || str_contains($entryName, '..')) {
                     continue;
                 }
@@ -421,6 +421,10 @@ class AdminController extends Controller
             }
             $zip->close();
 
+            // Rapikan sisa file ber-backslash (\) di Linux dari restore versi lama
+            $this->normalizeBackslashFilenames($uploadsBase);
+            $this->normalizeBackslashFilenames($installationsBase);
+
             // 2. Restore Database (JSON MySQL atau SQLite lama)
             $tempJsonPath = $tempDir . '/database_backup.json';
             $tempDbPath = $tempDir . '/database.sqlite';
@@ -453,6 +457,24 @@ class AdminController extends Controller
         } finally {
             if (File::exists($tempDir)) {
                 File::deleteDirectory($tempDir);
+            }
+        }
+    }
+
+    private function normalizeBackslashFilenames(string $baseDir): void
+    {
+        if (!File::exists($baseDir)) {
+            return;
+        }
+        foreach (File::files($baseDir) as $file) {
+            $name = $file->getFilename();
+            if (str_contains($name, '\\')) {
+                $cleanRel = ltrim(str_replace('\\', '/', $name), '/');
+                if ($cleanRel !== '' && !str_contains($cleanRel, '..')) {
+                    $dest = $baseDir . '/' . $cleanRel;
+                    File::makeDirectory(dirname($dest), 0755, true, true);
+                    File::move($file->getPathname(), $dest);
+                }
             }
         }
     }
