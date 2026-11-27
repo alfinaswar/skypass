@@ -321,17 +321,32 @@
                                     <br><span class="font-bold text-red-600 block mt-2 p-2 bg-red-100 rounded border border-red-200">⚠️ WARNING: This will OVERWRITE all current data and images! This action cannot be undone.</span>
                                 </p>
                                 
-                                <form action="{{ route('admin.restore') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('CRITICAL WARNING:\n\nYou are about to overwrite the entire database and images with this backup.\n\nAll current data will be LOST.\n\nAre you absolutely sure you want to proceed?');">
+                                <form id="restoreForm" action="{{ route('admin.restore') }}" method="POST" enctype="multipart/form-data">
                                     @csrf
                                     <div class="mb-4">
-                                        <input type="file" name="backup_file" accept=".zip" class="block w-full text-sm text-gray-500
+                                        <input type="file" id="restoreFileInput" name="backup_file" accept=".zip" class="block w-full text-sm text-gray-500
                                         file:mr-4 file:py-2 file:px-4
                                         file:rounded-md file:border-0
                                         file:text-sm file:font-semibold
                                         file:bg-yellow-200 file:text-yellow-800
                                         hover:file:bg-yellow-300 cursor-pointer" required>
                                     </div>
-                                    <button type="submit" class="w-full bg-yellow-600 text-white font-bold py-3 rounded-md hover:bg-yellow-700 shadow-md transition flex justify-center items-center">
+
+                                    <!-- Realtime Upload Progress Bar -->
+                                    <div id="restoreProgressWrapper" class="hidden mb-4 p-3 bg-white rounded-md border border-yellow-300">
+                                        <div class="flex justify-between items-center text-xs font-semibold text-gray-700 mb-1.5">
+                                            <span id="restoreProgressStatus">Uploading backup...</span>
+                                            <span id="restoreProgressPercent">0%</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                            <div id="restoreProgressBar" class="bg-yellow-600 h-3 rounded-full transition-all duration-150" style="width: 0%;"></div>
+                                        </div>
+                                        <div id="restoreProgressBytes" class="text-[11px] text-gray-500 mt-1 text-right">0 MB / 0 MB</div>
+                                    </div>
+
+                                    <div id="restoreInlineAlert" class="hidden mb-4 p-3 rounded-md text-xs font-semibold"></div>
+
+                                    <button type="submit" id="restoreSubmitBtn" class="w-full bg-yellow-600 text-white font-bold py-3 rounded-md hover:bg-yellow-700 shadow-md transition flex justify-center items-center">
                                         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                         Restore Backup
                                     </button>
@@ -399,5 +414,116 @@
                 closeResetPasswordModal();
             }
         });
+
+        const restoreForm = document.getElementById('restoreForm');
+        if (restoreForm) {
+            restoreForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                const fileInput = document.getElementById('restoreFileInput');
+                if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                    alert('Please select a backup (.zip) file first.');
+                    return;
+                }
+
+                const confirmed = confirm("CRITICAL WARNING:\n\nYou are about to overwrite the entire database and images with this backup.\n\nAll current data will be LOST.\n\nAre you absolutely sure you want to proceed?");
+                if (!confirmed) return;
+
+                const wrapper = document.getElementById('restoreProgressWrapper');
+                const bar = document.getElementById('restoreProgressBar');
+                const statusEl = document.getElementById('restoreProgressStatus');
+                const percentEl = document.getElementById('restoreProgressPercent');
+                const bytesEl = document.getElementById('restoreProgressBytes');
+                const alertEl = document.getElementById('restoreInlineAlert');
+                const submitBtn = document.getElementById('restoreSubmitBtn');
+
+                wrapper.classList.remove('hidden');
+                alertEl.classList.add('hidden');
+                bar.style.width = '0%';
+                bar.style.backgroundColor = '#ca8a04';
+                statusEl.textContent = 'Uploading backup file...';
+                percentEl.textContent = '0%';
+                bytesEl.textContent = '0 MB / ' + (fileInput.files[0].size / (1024 * 1024)).toFixed(2) + ' MB';
+
+                submitBtn.disabled = true;
+                submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
+                fileInput.disabled = true;
+
+                const formData = new FormData();
+                formData.append('_token', restoreForm.querySelector('input[name="_token"]').value);
+                formData.append('backup_file', fileInput.files[0]);
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', restoreForm.action, true);
+                xhr.setRequestHeader('Accept', 'application/json');
+                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+                xhr.upload.addEventListener('progress', function(ev) {
+                    if (ev.lengthComputable) {
+                        const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
+                        const loadedMb = (ev.loaded / (1024 * 1024)).toFixed(2);
+                        const totalMb = (ev.total / (1024 * 1024)).toFixed(2);
+                        bar.style.width = pct + '%';
+                        percentEl.textContent = pct + '%';
+                        bytesEl.textContent = `${loadedMb} MB / ${totalMb} MB`;
+
+                        if (pct >= 100) {
+                            bar.style.backgroundColor = '#1d4ed8';
+                            statusEl.textContent = 'Upload complete. Extracting & restoring database...';
+                        } else {
+                            statusEl.textContent = 'Uploading backup file...';
+                        }
+                    }
+                });
+
+                function resetControls() {
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+                    fileInput.disabled = false;
+                }
+
+                function showInlineError(msg) {
+                    bar.style.backgroundColor = '#dc2626';
+                    statusEl.textContent = 'Restore failed';
+                    alertEl.className = 'mb-4 p-3 rounded-md text-xs font-semibold bg-red-100 text-red-800 border border-red-300';
+                    alertEl.textContent = msg;
+                    alertEl.classList.remove('hidden');
+                    resetControls();
+                }
+
+                xhr.onload = function() {
+                    let data = null;
+                    try {
+                        data = JSON.parse(xhr.responseText);
+                    } catch (_) {}
+
+                    if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
+                        bar.style.width = '100%';
+                        bar.style.backgroundColor = '#16a34a';
+                        percentEl.textContent = '100%';
+                        statusEl.textContent = 'Restore completed!';
+                        alertEl.className = 'mb-4 p-3 rounded-md text-xs font-semibold bg-green-100 text-green-800 border border-green-300';
+                        alertEl.textContent = data.message || 'System Restored Successfully!';
+                        alertEl.classList.remove('hidden');
+                        setTimeout(() => {
+                            window.location.href = "{{ route('admin.index', ['tab' => 'backup']) }}";
+                        }, 1200);
+                    } else if (xhr.status === 413) {
+                        showInlineError('File terlalu besar melebihi batas upload server (upload_max_filesize / post_max_size).');
+                    } else {
+                        const errMsg = (data && data.errors && data.errors.backup_file && data.errors.backup_file[0])
+                            || (data && data.message)
+                            || `Server error (${xhr.status}).`;
+                        showInlineError(errMsg);
+                    }
+                };
+
+                xhr.onerror = function() {
+                    showInlineError('Network error while uploading backup file.');
+                };
+
+                xhr.send(formData);
+            });
+        }
     </script>
     </x-app-layout>

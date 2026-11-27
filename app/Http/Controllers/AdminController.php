@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use ZipArchive;
 
 class AdminController extends Controller
@@ -216,6 +217,8 @@ class AdminController extends Controller
     {
         if (auth()->user()->role !== 'supervisor') abort(403);
 
+        @set_time_limit(0);
+
         $request->validate([
             'backup_file' => 'required|file|mimes:zip|max:512000', // Max 500MB
         ]);
@@ -235,6 +238,10 @@ class AdminController extends Controller
                 $connection = config('database.default');
                 $tempJsonPath = $tempDir . '/database_backup.json';
                 $tempDbPath = $tempDir . '/database.sqlite';
+
+                if (!File::exists($tempJsonPath) && !File::exists($tempDbPath)) {
+                    throw new \RuntimeException('File backup tidak valid: database_backup.json atau database.sqlite tidak ditemukan di dalam ZIP.');
+                }
 
                 // 2. Restore Database (otomatis deteksi JSON MySQL atau SQLite lama)
                 if (File::exists($tempJsonPath)) {
@@ -271,7 +278,7 @@ class AdminController extends Controller
 
                 $tempInstallationsPath = $tempDir . '/installations';
                 if (File::exists($tempInstallationsPath)) {
-                    $targetInstallations = storage_path('app/private/installations');
+                    $targetInstallations = Storage::disk('local')->path('installations');
                     File::makeDirectory($targetInstallations, 0755, true, true);
                     File::copyDirectory($tempInstallationsPath, $targetInstallations);
                 }
@@ -279,14 +286,26 @@ class AdminController extends Controller
                 // 4. Bersihkan folder transit
                 File::deleteDirectory($tempDir);
 
+                $successMsg = 'System Restored Successfully! All database records and uploaded files have been recovered.';
+                if ($request->expectsJson()) {
+                    return response()->json(['success' => true, 'message' => $successMsg]);
+                }
+
                 return redirect()->route('admin.index', ['tab' => 'backup'])
-                    ->with('success', 'System Restored Successfully! All database records and images have been recovered.');
+                    ->with('success', $successMsg);
             } catch (\Exception $e) {
                 if (File::exists($tempDir)) {
                     File::deleteDirectory($tempDir);
                 }
+                if ($request->expectsJson()) {
+                    return response()->json(['success' => false, 'message' => 'Restore Failed: ' . $e->getMessage()], 500);
+                }
                 return redirect()->back()->with('error', 'Restore Failed: ' . $e->getMessage());
             }
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['success' => false, 'message' => 'Failed to open ZIP file. Make sure it is a valid backup archive.'], 422);
         }
 
         return redirect()->back()->with('error', 'Failed to open ZIP file. Make sure it is a valid backup archive.');
@@ -294,6 +313,8 @@ class AdminController extends Controller
 
     private function importTableDataToActiveDb(array $dump, string $connection): void
     {
+        $skipTables = ['migrations', 'sessions', 'cache', 'cache_locks', 'jobs', 'job_batches', 'failed_jobs'];
+
         if ($connection === 'sqlite') {
             DB::statement('PRAGMA foreign_keys = OFF');
         } else {
@@ -302,7 +323,7 @@ class AdminController extends Controller
 
         try {
             foreach ($dump as $table => $rows) {
-                if ($table === 'migrations' || !Schema::hasTable($table)) {
+                if (in_array($table, $skipTables, true) || !Schema::hasTable($table)) {
                     continue;
                 }
 

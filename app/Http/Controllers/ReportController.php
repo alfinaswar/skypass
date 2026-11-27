@@ -9,6 +9,7 @@ use ZipArchive;
 use RecursiveIteratorIterator;
 use RecursiveDirectoryIterator;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 
 class ReportController extends Controller
 {
@@ -186,62 +187,72 @@ class ReportController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
+        @set_time_limit(0);
+
         $fileName = 'backup_skypass_' . date('Y-m-d_H-i-s') . '.zip';
-        $zipPath = public_path($fileName);
+        $zipPath = storage_path('app/' . $fileName);
 
         $zip = new ZipArchive;
 
-        if ($zip->open($zipPath, ZipArchive::CREATE) === TRUE) {
-            $connection = config('database.default');
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
+            return redirect()->back()->with('error', 'Failed to create backup archive.');
+        }
 
-            // 1. Masukkan Database (otomatis SQLite atau MySQL/MariaDB)
-            if ($connection === 'sqlite') {
-                $dbPath = database_path('database.sqlite');
-                if (file_exists($dbPath)) {
-                    $zip->addFile($dbPath, 'database.sqlite');
-                }
-            } else {
-                $tables = collect(DB::select('SHOW TABLES'))
-                    ->map(fn ($row) => array_values((array) $row)[0])
-                    ->reject(fn ($table) => $table === 'migrations')
-                    ->values();
+        $connection = config('database.default');
+        $skipTables = ['migrations', 'sessions', 'cache', 'cache_locks', 'jobs', 'job_batches', 'failed_jobs'];
 
-                $dump = [];
-                foreach ($tables as $table) {
-                    $dump[$table] = DB::table($table)->get()->map(fn ($row) => (array) $row)->all();
-                }
+        // 1. Masukkan Database (otomatis SQLite atau MySQL/MariaDB)
+        if ($connection === 'sqlite') {
+            $dbPath = database_path('database.sqlite');
+            if (file_exists($dbPath)) {
+                $zip->addFile($dbPath, 'database.sqlite');
+            }
+        } else {
+            $tables = collect(DB::select('SHOW TABLES'))
+                ->map(fn ($row) => array_values((array) $row)[0])
+                ->reject(fn ($table) => in_array($table, $skipTables, true))
+                ->values();
 
-                $zip->addFromString('database_backup.json', json_encode($dump, JSON_UNESCAPED_UNICODE));
+            $dump = [];
+            foreach ($tables as $table) {
+                $dump[$table] = DB::table($table)->get()->map(fn ($row) => (array) $row)->all();
             }
 
-            // 2. Masukkan Folder Uploads & Installation Proofs secara Rekursif
-            $folders = [
-                'uploads' => public_path('uploads'),
-                'installations' => storage_path('app/private/installations'),
-            ];
+            $zip->addFromString('database_backup.json', json_encode($dump, JSON_UNESCAPED_UNICODE));
+        }
 
-            foreach ($folders as $zipPrefix => $folderPath) {
-                if (File::exists($folderPath)) {
-                    $files = new RecursiveIteratorIterator(
-                        new RecursiveDirectoryIterator($folderPath),
-                        RecursiveIteratorIterator::LEAVES_ONLY
-                    );
+        // 2. Masukkan Folder Uploads & Installation Proofs secara Rekursif
+        $folders = [
+            'uploads' => public_path('uploads'),
+            'installations' => Storage::disk('local')->path('installations'),
+        ];
 
-                    foreach ($files as $file) {
-                        if (!$file->isDir()) {
-                            $filePath = $file->getRealPath();
-                            $relativePath = $zipPrefix . '/' . ltrim(str_replace('\\', '/', substr($filePath, strlen($folderPath))), '/');
-                            $zip->addFile($filePath, $relativePath);
-                        }
+        foreach ($folders as $zipPrefix => $folderPath) {
+            $realFolder = realpath($folderPath);
+            if ($realFolder && File::exists($realFolder)) {
+                $files = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($realFolder, \FilesystemIterator::SKIP_DOTS),
+                    RecursiveIteratorIterator::LEAVES_ONLY
+                );
+
+                foreach ($files as $file) {
+                    if (!$file->isDir()) {
+                        $filePath = $file->getRealPath();
+                        $relative = ltrim(str_replace('\\', '/', substr($filePath, strlen($realFolder))), '/');
+                        $zip->addFile($filePath, $zipPrefix . '/' . $relative);
                     }
                 }
             }
+        }
 
-            $zip->close();
+        $zip->close();
+
+        if (!file_exists($zipPath)) {
+            return redirect()->back()->with('error', 'Backup archive could not be generated (no data or files found).');
         }
 
         // Return file zip lalu hapus dari server setelah terdownload agar hemat space
-        return response()->download($zipPath)->deleteFileAfterSend(true);
+        return response()->download($zipPath, $fileName)->deleteFileAfterSend(true);
     }
 
     /**
