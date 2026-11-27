@@ -112,11 +112,29 @@ class TransactionController extends Controller
         }
 
         $index = max(0, (int) $request->query('index', 0));
-        $proofPath = $paths[$index] ?? null;
+        $proofPath = isset($paths[$index]) ? ltrim(str_replace('\\', '/', $paths[$index]), '/') : null;
 
-        abort_unless($proofPath && Storage::disk('local')->exists($proofPath), 404);
+        abort_unless($proofPath, 404);
 
-        return Storage::disk('local')->response($proofPath);
+        if (Storage::disk('local')->exists($proofPath)) {
+            return Storage::disk('local')->response($proofPath);
+        }
+
+        $candidates = [
+            storage_path('app/public/' . $proofPath),
+            public_path($proofPath),
+            Storage::disk('local')->path('installations/' . basename($proofPath)),
+            storage_path('app/public/uploads/installations/' . basename($proofPath)),
+            public_path('uploads/installations/' . basename($proofPath)),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (File::exists($candidate) && is_file($candidate)) {
+                return response()->file($candidate);
+            }
+        }
+
+        abort(404);
     }
 
     // --- BARU: FUNGSI DOWNLOAD PDF BAST (BULK) ---

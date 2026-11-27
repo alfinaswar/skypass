@@ -184,10 +184,17 @@
                 if (!is_string($path) || $path === '' || str_ends_with(strtolower($path), '.pdf')) {
                     continue;
                 }
-                if (\Illuminate\Support\Facades\Storage::disk('local')->exists($path)) {
-                    $resolved[] = \Illuminate\Support\Facades\Storage::disk('local')->path($path);
-                } elseif (file_exists(public_path($path))) {
-                    $resolved[] = public_path($path);
+                $cleanPath = ltrim(str_replace('\\', '/', $path), '/');
+                if (\Illuminate\Support\Facades\Storage::disk('local')->exists($cleanPath)) {
+                    $resolved[] = \Illuminate\Support\Facades\Storage::disk('local')->path($cleanPath);
+                } elseif (file_exists(storage_path('app/public/' . $cleanPath))) {
+                    $resolved[] = storage_path('app/public/' . $cleanPath);
+                } elseif (file_exists(public_path($cleanPath))) {
+                    $resolved[] = public_path($cleanPath);
+                } elseif (file_exists(storage_path('app/public/uploads/installations/' . basename($cleanPath)))) {
+                    $resolved[] = storage_path('app/public/uploads/installations/' . basename($cleanPath));
+                } elseif (file_exists(public_path('uploads/installations/' . basename($cleanPath)))) {
+                    $resolved[] = public_path('uploads/installations/' . basename($cleanPath));
                 }
             }
             return $resolved;

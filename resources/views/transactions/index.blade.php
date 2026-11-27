@@ -251,8 +251,12 @@
                                         @elseif($loop->first)
                                             <td rowspan="{{ $rowCount }}" class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top border-b border-gray-200">
                                                 @if($trx->status === 'completed')
-                                                    @if($trx->proof_image_url && file_exists(public_path($trx->proof_image_url)))
-                                                        <a href="{{ asset($trx->proof_image_url) }}" target="_blank" class="text-blue-600 hover:text-blue-900 font-semibold">View</a>
+                                                    @php
+                                                        $inProof = $trx->proof_image_url ? ltrim(str_replace('\\', '/', $trx->proof_image_url), '/') : null;
+                                                        $hasInProof = $inProof && (file_exists(public_path($inProof)) || file_exists(storage_path('app/public/' . $inProof)));
+                                                    @endphp
+                                                    @if($hasInProof)
+                                                        <a href="{{ asset($inProof) }}" target="_blank" class="text-blue-600 hover:text-blue-900 font-semibold">View</a>
                                                     @else
                                                         <span class="text-gray-400">-</span>
                                                     @endif
