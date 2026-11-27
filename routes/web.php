@@ -124,6 +124,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/admin/restore', [AdminController::class, 'restoreBackup'])->name('admin.restore');
     Route::post('/admin/restore/chunk', [AdminController::class, 'restoreChunk'])->name('admin.restore.chunk');
     Route::post('/admin/restore/finalize', [AdminController::class, 'restoreFinalize'])->name('admin.restore.finalize');
+    Route::post('/admin/fix-uploads', [AdminController::class, 'fixUploadFolders'])->name('admin.fixUploads');
 
     // Tab 4: Manage Vehicles
     Route::post('/admin/vehicles', [AdminController::class, 'storeVehicle'])->name('admin.vehicles.store');

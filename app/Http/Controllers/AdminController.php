@@ -386,7 +386,17 @@ class AdminController extends Controller
 
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $entryName = ltrim(str_replace('\\', '/', $zip->getNameIndex($i)), './');
-                if ($entryName === '' || str_ends_with($entryName, '/') || str_contains($entryName, '..')) {
+                if ($entryName === '' || str_contains($entryName, '..')) {
+                    continue;
+                }
+
+                if (str_ends_with($entryName, '/')) {
+                    $dirRel = rtrim($entryName, '/');
+                    if (str_starts_with($dirRel, 'uploads/')) {
+                        File::makeDirectory($uploadsBase . '/' . substr($dirRel, strlen('uploads/')), 0755, true, true);
+                    } elseif (str_starts_with($dirRel, 'installations/')) {
+                        File::makeDirectory($installationsBase . '/' . substr($dirRel, strlen('installations/')), 0755, true, true);
+                    }
                     continue;
                 }
 
@@ -461,22 +471,50 @@ class AdminController extends Controller
         }
     }
 
-    private function normalizeBackslashFilenames(string $baseDir): void
+    public function fixUploadFolders()
     {
-        if (!File::exists($baseDir)) {
-            return;
+        if (auth()->user()->role !== 'supervisor') abort(403);
+
+        $moved = 0;
+        $moved += $this->normalizeBackslashFilenames(public_path('uploads'));
+        $moved += $this->normalizeBackslashFilenames(Storage::disk('local')->path('installations'));
+
+        return redirect()->route('admin.index', ['tab' => 'backup'])
+            ->with('success', $moved > 0
+                ? "Berhasil merapikan {$moved} file ke subfolder yang benar."
+                : 'Semua file sudah berada di folder yang benar.');
+    }
+
+    private function normalizeBackslashFilenames(string $baseDir): int
+    {
+        if (!is_dir($baseDir)) {
+            return 0;
         }
-        foreach (File::files($baseDir) as $file) {
-            $name = $file->getFilename();
-            if (str_contains($name, '\\')) {
+
+        $moved = 0;
+        $items = @scandir($baseDir);
+        if (!is_array($items)) {
+            return 0;
+        }
+
+        foreach ($items as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $fullPath = $baseDir . DIRECTORY_SEPARATOR . $name;
+            if (is_file($fullPath) && str_contains($name, '\\')) {
                 $cleanRel = ltrim(str_replace('\\', '/', $name), '/');
                 if ($cleanRel !== '' && !str_contains($cleanRel, '..')) {
                     $dest = $baseDir . '/' . $cleanRel;
                     File::makeDirectory(dirname($dest), 0755, true, true);
-                    File::move($file->getPathname(), $dest);
+                    if (@rename($fullPath, $dest)) {
+                        $moved++;
+                    }
                 }
             }
         }
+
+        return $moved;
     }
 
     private function importTableDataToActiveDb(array $dump, string $connection): void

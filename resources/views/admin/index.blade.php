@@ -351,6 +351,13 @@
                                         Restore Backup
                                     </button>
                                 </form>
+
+                                <form action="{{ route('admin.fixUploads') }}" method="POST" class="mt-3">
+                                    @csrf
+                                    <button type="submit" class="w-full bg-white text-yellow-800 border border-yellow-400 font-semibold py-2 rounded-md hover:bg-yellow-100 text-xs transition">
+                                        Rapikan File Upload (Fix Backslash `\`)
+                                    </button>
+                                </form>
                             </div>
 
                         </div>
