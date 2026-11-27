@@ -222,8 +222,14 @@ class ReportController extends Controller
         }
 
         // 2. Masukkan Folder Uploads & Installation Proofs secara Rekursif
+        $storageUploads = storage_path('app/public/uploads');
+        $publicUploads = public_path('uploads');
+        $uploadsSource = (File::exists($storageUploads) && count(File::allFiles($storageUploads)) > 0)
+            ? $storageUploads
+            : $publicUploads;
+
         $folders = [
-            'uploads' => public_path('uploads'),
+            'uploads' => $uploadsSource,
             'installations' => Storage::disk('local')->path('installations'),
         ];
 

@@ -380,9 +380,11 @@ class AdminController extends Controller
                 throw new \RuntimeException('File backup tidak valid: database_backup.json atau database.sqlite tidak ditemukan di dalam ZIP.');
             }
 
-            // 1. Ekstrak file database ke tempDir & stream file uploads/installations langsung ke tujuan
-            $uploadsBase = public_path('uploads');
+            // 1. Ekstrak file database ke tempDir & stream file uploads/installations langsung ke storage
+            $uploadsBase = storage_path('app/public/uploads');
             $installationsBase = Storage::disk('local')->path('installations');
+            File::makeDirectory($uploadsBase, 0755, true, true);
+            File::makeDirectory($installationsBase, 0755, true, true);
 
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $entryName = ltrim(str_replace('\\', '/', $zip->getNameIndex($i)), './');
@@ -431,9 +433,10 @@ class AdminController extends Controller
             }
             $zip->close();
 
-            // Rapikan sisa file ber-backslash (\) di Linux dari restore versi lama
+            // Rapikan sisa file ber-backslash (\) & pindahkan public/uploads ke storage/app/public/uploads + buat symlink
             $this->normalizeBackslashFilenames($uploadsBase);
             $this->normalizeBackslashFilenames($installationsBase);
+            $this->migratePublicUploadsToStorage();
 
             // 2. Restore Database (JSON MySQL atau SQLite lama)
             $tempJsonPath = $tempDir . '/database_backup.json';
@@ -475,14 +478,63 @@ class AdminController extends Controller
     {
         if (auth()->user()->role !== 'supervisor') abort(403);
 
+        $storageUploads = storage_path('app/public/uploads');
+        File::makeDirectory($storageUploads, 0755, true, true);
+
         $moved = 0;
         $moved += $this->normalizeBackslashFilenames(public_path('uploads'));
+        $moved += $this->normalizeBackslashFilenames($storageUploads);
         $moved += $this->normalizeBackslashFilenames(Storage::disk('local')->path('installations'));
+        $moved += $this->migratePublicUploadsToStorage();
 
         return redirect()->route('admin.index', ['tab' => 'backup'])
             ->with('success', $moved > 0
-                ? "Berhasil merapikan {$moved} file ke subfolder yang benar."
-                : 'Semua file sudah berada di folder yang benar.');
+                ? "Berhasil merapikan & memindahkan {$moved} file ke storage/app/public/uploads (siap/terhubung dengan storage:link)."
+                : 'Semua file sudah berada di storage/app/public/uploads dan terhubung.');
+    }
+
+    private function migratePublicUploadsToStorage(): int
+    {
+        $publicUploads = public_path('uploads');
+        $storageUploads = storage_path('app/public/uploads');
+        File::makeDirectory($storageUploads, 0755, true, true);
+
+        $moved = 0;
+
+        // Jika public/uploads masih berupa folder asli (bukan symlink), pindahkan isinya ke storage/app/public/uploads
+        if (is_dir($publicUploads) && !is_link($publicUploads)) {
+            $files = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($publicUploads, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            $realPublic = realpath($publicUploads);
+            foreach ($files as $file) {
+                if (!$file->isDir()) {
+                    $srcPath = $file->getRealPath();
+                    $rel = ltrim(str_replace('\\', '/', substr($srcPath, strlen($realPublic))), '/');
+                    $destPath = $storageUploads . '/' . $rel;
+                    File::makeDirectory(dirname($destPath), 0755, true, true);
+                    if (@rename($srcPath, $destPath) || @copy($srcPath, $destPath)) {
+                        if (file_exists($srcPath) && file_exists($destPath)) {
+                            @unlink($srcPath);
+                        }
+                        $moved++;
+                    }
+                }
+            }
+            File::deleteDirectory($publicUploads);
+        }
+
+        // Buat symlink public/uploads -> storage/app/public/uploads dan public/storage -> storage/app/public jika belum ada
+        if (!file_exists($publicUploads) && !is_link($publicUploads) && function_exists('symlink')) {
+            @symlink($storageUploads, $publicUploads);
+        }
+        $publicStorageLink = public_path('storage');
+        if (!file_exists($publicStorageLink) && !is_link($publicStorageLink) && function_exists('symlink')) {
+            @symlink(storage_path('app/public'), $publicStorageLink);
+        }
+
+        return $moved;
     }
 
     private function normalizeBackslashFilenames(string $baseDir): int
