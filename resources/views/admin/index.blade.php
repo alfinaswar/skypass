@@ -417,7 +417,7 @@
 
         const restoreForm = document.getElementById('restoreForm');
         if (restoreForm) {
-            restoreForm.addEventListener('submit', function(e) {
+            restoreForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
 
                 const fileInput = document.getElementById('restoreFileInput');
@@ -426,6 +426,7 @@
                     return;
                 }
 
+                const file = fileInput.files[0];
                 const confirmed = confirm("CRITICAL WARNING:\n\nYou are about to overwrite the entire database and images with this backup.\n\nAll current data will be LOST.\n\nAre you absolutely sure you want to proceed?");
                 if (!confirmed) return;
 
@@ -436,6 +437,7 @@
                 const bytesEl = document.getElementById('restoreProgressBytes');
                 const alertEl = document.getElementById('restoreInlineAlert');
                 const submitBtn = document.getElementById('restoreSubmitBtn');
+                const csrfToken = restoreForm.querySelector('input[name="_token"]').value;
 
                 wrapper.classList.remove('hidden');
                 alertEl.classList.add('hidden');
@@ -443,38 +445,11 @@
                 bar.style.backgroundColor = '#ca8a04';
                 statusEl.textContent = 'Uploading backup file...';
                 percentEl.textContent = '0%';
-                bytesEl.textContent = '0 MB / ' + (fileInput.files[0].size / (1024 * 1024)).toFixed(2) + ' MB';
+                bytesEl.textContent = '0.00 MB / ' + (file.size / (1024 * 1024)).toFixed(2) + ' MB';
 
                 submitBtn.disabled = true;
                 submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
                 fileInput.disabled = true;
-
-                const formData = new FormData();
-                formData.append('_token', restoreForm.querySelector('input[name="_token"]').value);
-                formData.append('backup_file', fileInput.files[0]);
-
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', restoreForm.action, true);
-                xhr.setRequestHeader('Accept', 'application/json');
-                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-
-                xhr.upload.addEventListener('progress', function(ev) {
-                    if (ev.lengthComputable) {
-                        const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
-                        const loadedMb = (ev.loaded / (1024 * 1024)).toFixed(2);
-                        const totalMb = (ev.total / (1024 * 1024)).toFixed(2);
-                        bar.style.width = pct + '%';
-                        percentEl.textContent = pct + '%';
-                        bytesEl.textContent = `${loadedMb} MB / ${totalMb} MB`;
-
-                        if (pct >= 100) {
-                            bar.style.backgroundColor = '#1d4ed8';
-                            statusEl.textContent = 'Upload complete. Extracting & restoring database...';
-                        } else {
-                            statusEl.textContent = 'Uploading backup file...';
-                        }
-                    }
-                });
 
                 function resetControls() {
                     submitBtn.disabled = false;
@@ -491,38 +466,107 @@
                     resetControls();
                 }
 
-                xhr.onload = function() {
-                    let data = null;
+                function parseJsonSafe(rawText) {
+                    const text = (rawText || '').trim();
                     try {
-                        data = JSON.parse(xhr.responseText);
-                    } catch (_) {}
+                        return JSON.parse(text);
+                    } catch (_) {
+                        const jsonStart = text.indexOf('{');
+                        const jsonEnd = text.lastIndexOf('}');
+                        if (jsonStart !== -1 && jsonEnd > jsonStart) {
+                            try {
+                                return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+                            } catch (_) {}
+                        }
+                    }
+                    return null;
+                }
 
-                    if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
-                        bar.style.width = '100%';
+                function uploadChunk(url, formData, onProgress) {
+                    return new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', url, true);
+                        xhr.setRequestHeader('Accept', 'application/json');
+                        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                        if (onProgress) {
+                            xhr.upload.addEventListener('progress', onProgress);
+                        }
+                        xhr.onload = () => resolve(xhr);
+                        xhr.onerror = () => reject(new Error('Network error while uploading backup file.'));
+                        xhr.send(formData);
+                    });
+                }
+
+                try {
+                    const chunkSize = 2 * 1024 * 1024; // 2 MB per chunk (aman untuk limit upload hosting)
+                    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
+                    const uploadId = 'rst_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+                    const totalMb = (file.size / (1024 * 1024)).toFixed(2);
+
+                    for (let idx = 0; idx < totalChunks; idx++) {
+                        const start = idx * chunkSize;
+                        const end = Math.min(file.size, start + chunkSize);
+                        const blob = file.slice(start, end);
+
+                        const fd = new FormData();
+                        fd.append('_token', csrfToken);
+                        fd.append('upload_id', uploadId);
+                        fd.append('chunk_index', String(idx));
+                        fd.append('total_chunks', String(totalChunks));
+                        fd.append('chunk', blob, 'chunk.part');
+
+                        const xhr = await uploadChunk("{{ route('admin.restore.chunk') }}", fd, function(ev) {
+                            if (ev.lengthComputable) {
+                                const uploadedBytes = Math.min(file.size, start + ev.loaded);
+                                const pct = Math.min(99, Math.round((uploadedBytes / file.size) * 100));
+                                bar.style.width = pct + '%';
+                                percentEl.textContent = pct + '%';
+                                bytesEl.textContent = `${(uploadedBytes / (1024 * 1024)).toFixed(2)} MB / ${totalMb} MB`;
+                                statusEl.textContent = `Uploading chunk ${idx + 1}/${totalChunks}...`;
+                            }
+                        });
+
+                        const chunkRes = parseJsonSafe(xhr.responseText);
+                        if (xhr.status < 200 || xhr.status >= 300 || !chunkRes || !chunkRes.success) {
+                            const errMsg = (chunkRes && chunkRes.message)
+                                || `Upload chunk failed (HTTP ${xhr.status}).`;
+                            showInlineError(errMsg);
+                            return;
+                        }
+                    }
+
+                    // Semua chunk selesai -> finalize ekstrak & restore di server
+                    bar.style.width = '100%';
+                    bar.style.backgroundColor = '#1d4ed8';
+                    percentEl.textContent = '100%';
+                    bytesEl.textContent = `${totalMb} MB / ${totalMb} MB`;
+                    statusEl.textContent = 'Upload complete. Extracting & restoring database...';
+
+                    const finalizeFd = new FormData();
+                    finalizeFd.append('_token', csrfToken);
+                    finalizeFd.append('upload_id', uploadId);
+
+                    const finalXhr = await uploadChunk("{{ route('admin.restore.finalize') }}", finalizeFd);
+                    const finalData = parseJsonSafe(finalXhr.responseText);
+
+                    if (finalXhr.status >= 200 && finalXhr.status < 300 && finalData && finalData.success) {
                         bar.style.backgroundColor = '#16a34a';
-                        percentEl.textContent = '100%';
                         statusEl.textContent = 'Restore completed!';
                         alertEl.className = 'mb-4 p-3 rounded-md text-xs font-semibold bg-green-100 text-green-800 border border-green-300';
-                        alertEl.textContent = data.message || 'System Restored Successfully!';
+                        alertEl.textContent = finalData.message || 'System Restored Successfully!';
                         alertEl.classList.remove('hidden');
                         setTimeout(() => {
                             window.location.href = "{{ route('admin.index', ['tab' => 'backup']) }}";
                         }, 1200);
-                    } else if (xhr.status === 413) {
-                        showInlineError('File terlalu besar melebihi batas upload server (upload_max_filesize / post_max_size).');
                     } else {
-                        const errMsg = (data && data.errors && data.errors.backup_file && data.errors.backup_file[0])
-                            || (data && data.message)
-                            || `Server error (${xhr.status}).`;
+                        const snippet = (finalXhr.responseText || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+                        const errMsg = (finalData && finalData.message)
+                            || (snippet ? `Restore error (${finalXhr.status}): ${snippet}` : `Restore error (${finalXhr.status}).`);
                         showInlineError(errMsg);
                     }
-                };
-
-                xhr.onerror = function() {
-                    showInlineError('Network error while uploading backup file.');
-                };
-
-                xhr.send(formData);
+                } catch (err) {
+                    showInlineError(err.message || 'Network error while uploading backup file.');
+                }
             });
         }
     </script>

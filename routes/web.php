@@ -122,6 +122,8 @@ Route::middleware('auth')->group(function () {
     // Tab 3: Backup & Restore
     // Note: Route backup.download sudah ada di ReportController sebelumnya, jadi di sini cukup restore
     Route::post('/admin/restore', [AdminController::class, 'restoreBackup'])->name('admin.restore');
+    Route::post('/admin/restore/chunk', [AdminController::class, 'restoreChunk'])->name('admin.restore.chunk');
+    Route::post('/admin/restore/finalize', [AdminController::class, 'restoreFinalize'])->name('admin.restore.finalize');
 
     // Tab 4: Manage Vehicles
     Route::post('/admin/vehicles', [AdminController::class, 'storeVehicle'])->name('admin.vehicles.store');

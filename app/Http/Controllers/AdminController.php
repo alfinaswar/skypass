@@ -213,102 +213,248 @@ class AdminController extends Controller
 
     // --- TAB 3: RESTORE BACKUP ---
 
+    public function restoreChunk(Request $request)
+    {
+        if (auth()->user()->role !== 'supervisor') abort(403);
+
+        @set_time_limit(0);
+        @ini_set('display_errors', '0');
+
+        $request->validate([
+            'upload_id' => 'required|string|regex:/^[a-zA-Z0-9_-]{8,64}$/',
+            'chunk_index' => 'required|integer|min:0',
+            'total_chunks' => 'required|integer|min:1',
+            'chunk' => 'required|file',
+        ]);
+
+        $chunkDir = storage_path('app/temp_chunks_' . $request->upload_id);
+        File::makeDirectory($chunkDir, 0755, true, true);
+
+        $partFile = $chunkDir . '/backup.zip.part';
+        $chunkHandle = fopen($request->file('chunk')->getRealPath(), 'rb');
+        $mode = ((int) $request->chunk_index === 0) ? 'wb' : 'ab';
+        $outHandle = fopen($partFile, $mode);
+
+        if (!$chunkHandle || !$outHandle) {
+            if ($chunkHandle) fclose($chunkHandle);
+            if ($outHandle) fclose($outHandle);
+            return response()->json(['success' => false, 'message' => 'Failed to write upload chunk on server.'], 500);
+        }
+
+        stream_copy_to_stream($chunkHandle, $outHandle);
+        fclose($chunkHandle);
+        fclose($outHandle);
+
+        return response()->json([
+            'success' => true,
+            'chunk_index' => (int) $request->chunk_index,
+        ]);
+    }
+
+    public function restoreFinalize(Request $request)
+    {
+        if (auth()->user()->role !== 'supervisor') abort(403);
+
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+        @ini_set('display_errors', '0');
+        if (ob_get_level() === 0) {
+            ob_start();
+        }
+
+        register_shutdown_function(function () {
+            $err = error_get_last();
+            if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+                if (!headers_sent()) {
+                    http_response_code(500);
+                    header('Content-Type: application/json');
+                }
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Server Fatal Error: ' . $err['message'],
+                ]);
+            }
+        });
+
+        $request->validate([
+            'upload_id' => 'required|string|regex:/^[a-zA-Z0-9_-]{8,64}$/',
+        ]);
+
+        $chunkDir = storage_path('app/temp_chunks_' . $request->upload_id);
+        $zipPath = $chunkDir . '/backup.zip.part';
+
+        if (!File::exists($zipPath)) {
+            while (ob_get_level() > 0) ob_end_clean();
+            return response()->json(['success' => false, 'message' => 'Uploaded backup file not found on server.'], 422);
+        }
+
+        try {
+            $this->processRestoreZip($zipPath);
+            File::deleteDirectory($chunkDir);
+
+            while (ob_get_level() > 0) ob_end_clean();
+            return response()->json([
+                'success' => true,
+                'message' => 'System Restored Successfully! All database records and uploaded files have been recovered.',
+            ]);
+        } catch (\Throwable $e) {
+            if (File::exists($chunkDir)) {
+                File::deleteDirectory($chunkDir);
+            }
+            while (ob_get_level() > 0) ob_end_clean();
+            return response()->json(['success' => false, 'message' => 'Restore Failed: ' . $e->getMessage()], 500);
+        }
+    }
+
     public function restoreBackup(Request $request)
     {
         if (auth()->user()->role !== 'supervisor') abort(403);
 
         @set_time_limit(0);
-
-        $request->validate([
-            'backup_file' => 'required|file|mimes:zip|max:512000', // Max 500MB
-        ]);
-
-        $zipPath = $request->file('backup_file')->path();
-        $zip = new ZipArchive;
-
-        if ($zip->open($zipPath) === TRUE) {
-            $tempDir = storage_path('app/temp_restore_' . time());
-            File::makeDirectory($tempDir, 0755, true, true);
-
-            try {
-                // 1. Ekstrak ke folder transit
-                $zip->extractTo($tempDir);
-                $zip->close();
-
-                $connection = config('database.default');
-                $tempJsonPath = $tempDir . '/database_backup.json';
-                $tempDbPath = $tempDir . '/database.sqlite';
-
-                if (!File::exists($tempJsonPath) && !File::exists($tempDbPath)) {
-                    throw new \RuntimeException('File backup tidak valid: database_backup.json atau database.sqlite tidak ditemukan di dalam ZIP.');
-                }
-
-                // 2. Restore Database (otomatis deteksi JSON MySQL atau SQLite lama)
-                if (File::exists($tempJsonPath)) {
-                    $dump = json_decode(File::get($tempJsonPath), true);
-                    if (!is_array($dump)) {
-                        throw new \RuntimeException('Invalid database_backup.json format.');
-                    }
-                    $this->importTableDataToActiveDb($dump, $connection);
-                } elseif (File::exists($tempDbPath)) {
-                    if ($connection === 'sqlite') {
-                        File::copy($tempDbPath, database_path('database.sqlite'));
-                    } else {
-                        if (!extension_loaded('pdo_sqlite')) {
-                            throw new \RuntimeException('Ekstensi PHP pdo_sqlite tidak aktif di server untuk membaca backup SQLite.');
-                        }
-                        $sqlitePdo = new \PDO('sqlite:' . $tempDbPath);
-                        $sqlitePdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-                        $tables = $sqlitePdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'migrations'")->fetchAll(\PDO::FETCH_COLUMN);
-
-                        $dump = [];
-                        foreach ($tables as $table) {
-                            $stmt = $sqlitePdo->query("SELECT * FROM \"{$table}\"");
-                            $dump[$table] = $stmt ? $stmt->fetchAll(\PDO::FETCH_ASSOC) : [];
-                        }
-                        $this->importTableDataToActiveDb($dump, $connection);
-                    }
-                }
-
-                // 3. Pindahkan folder uploads & installations
-                $tempUploadsPath = $tempDir . '/uploads';
-                if (File::exists($tempUploadsPath)) {
-                    File::copyDirectory($tempUploadsPath, public_path('uploads'));
-                }
-
-                $tempInstallationsPath = $tempDir . '/installations';
-                if (File::exists($tempInstallationsPath)) {
-                    $targetInstallations = Storage::disk('local')->path('installations');
-                    File::makeDirectory($targetInstallations, 0755, true, true);
-                    File::copyDirectory($tempInstallationsPath, $targetInstallations);
-                }
-
-                // 4. Bersihkan folder transit
-                File::deleteDirectory($tempDir);
-
-                $successMsg = 'System Restored Successfully! All database records and uploaded files have been recovered.';
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => true, 'message' => $successMsg]);
-                }
-
-                return redirect()->route('admin.index', ['tab' => 'backup'])
-                    ->with('success', $successMsg);
-            } catch (\Exception $e) {
-                if (File::exists($tempDir)) {
-                    File::deleteDirectory($tempDir);
-                }
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => false, 'message' => 'Restore Failed: ' . $e->getMessage()], 500);
-                }
-                return redirect()->back()->with('error', 'Restore Failed: ' . $e->getMessage());
+        @ini_set('memory_limit', '512M');
+        $isAjax = $request->expectsJson() || $request->ajax() || $request->boolean('_ajax');
+        if ($isAjax) {
+            @ini_set('display_errors', '0');
+            if (ob_get_level() === 0) {
+                ob_start();
             }
         }
 
-        if ($request->expectsJson()) {
-            return response()->json(['success' => false, 'message' => 'Failed to open ZIP file. Make sure it is a valid backup archive.'], 422);
+        $respondJson = function (array $payload, int $status = 200) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            return response()->json($payload, $status);
+        };
+
+        try {
+            $request->validate([
+                'backup_file' => 'required|file|mimes:zip|max:512000', // Max 500MB
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            if ($isAjax) {
+                return $respondJson([
+                    'success' => false,
+                    'message' => collect($e->errors())->flatten()->first() ?? 'Validation failed.',
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+            throw $e;
         }
 
-        return redirect()->back()->with('error', 'Failed to open ZIP file. Make sure it is a valid backup archive.');
+        try {
+            $this->processRestoreZip($request->file('backup_file')->path());
+            $successMsg = 'System Restored Successfully! All database records and uploaded files have been recovered.';
+            if ($isAjax) {
+                return $respondJson(['success' => true, 'message' => $successMsg]);
+            }
+            return redirect()->route('admin.index', ['tab' => 'backup'])->with('success', $successMsg);
+        } catch (\Throwable $e) {
+            if ($isAjax) {
+                return $respondJson(['success' => false, 'message' => 'Restore Failed: ' . $e->getMessage()], 500);
+            }
+            return redirect()->back()->with('error', 'Restore Failed: ' . $e->getMessage());
+        }
+    }
+
+    private function processRestoreZip(string $zipPath): void
+    {
+        $zip = new ZipArchive;
+        if ($zip->open($zipPath) !== TRUE) {
+            throw new \RuntimeException('Failed to open ZIP file. Make sure it is a valid backup archive.');
+        }
+
+        $tempDir = storage_path('app/temp_restore_' . time() . '_' . mt_rand(100, 999));
+        File::makeDirectory($tempDir, 0755, true, true);
+
+        try {
+            $connection = config('database.default');
+            $hasDbJson = $zip->locateName('database_backup.json') !== false;
+            $hasDbSqlite = $zip->locateName('database.sqlite') !== false;
+
+            if (!$hasDbJson && !$hasDbSqlite) {
+                $zip->close();
+                throw new \RuntimeException('File backup tidak valid: database_backup.json atau database.sqlite tidak ditemukan di dalam ZIP.');
+            }
+
+            // 1. Ekstrak file database ke tempDir & stream file uploads/installations langsung ke tujuan
+            $uploadsBase = public_path('uploads');
+            $installationsBase = Storage::disk('local')->path('installations');
+
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $entryName = str_replace('\\', '/', $zip->getNameIndex($i));
+                if ($entryName === '' || str_ends_with($entryName, '/') || str_contains($entryName, '..')) {
+                    continue;
+                }
+
+                if ($entryName === 'database_backup.json' || $entryName === 'database.sqlite') {
+                    $stream = $zip->getStream($zip->getNameIndex($i));
+                    if ($stream) {
+                        $out = fopen($tempDir . '/' . $entryName, 'wb');
+                        stream_copy_to_stream($stream, $out);
+                        fclose($out);
+                        fclose($stream);
+                    }
+                    continue;
+                }
+
+                $targetPath = null;
+                if (str_starts_with($entryName, 'uploads/')) {
+                    $targetPath = $uploadsBase . '/' . substr($entryName, strlen('uploads/'));
+                } elseif (str_starts_with($entryName, 'installations/')) {
+                    $targetPath = $installationsBase . '/' . substr($entryName, strlen('installations/'));
+                }
+
+                if ($targetPath !== null) {
+                    File::makeDirectory(dirname($targetPath), 0755, true, true);
+                    $stream = $zip->getStream($zip->getNameIndex($i));
+                    if ($stream) {
+                        $out = fopen($targetPath, 'wb');
+                        stream_copy_to_stream($stream, $out);
+                        fclose($out);
+                        fclose($stream);
+                    }
+                }
+            }
+            $zip->close();
+
+            // 2. Restore Database (JSON MySQL atau SQLite lama)
+            $tempJsonPath = $tempDir . '/database_backup.json';
+            $tempDbPath = $tempDir . '/database.sqlite';
+
+            if (File::exists($tempJsonPath)) {
+                $dump = json_decode(File::get($tempJsonPath), true);
+                if (!is_array($dump)) {
+                    throw new \RuntimeException('Invalid database_backup.json format.');
+                }
+                $this->importTableDataToActiveDb($dump, $connection);
+            } elseif (File::exists($tempDbPath)) {
+                if ($connection === 'sqlite') {
+                    File::copy($tempDbPath, database_path('database.sqlite'));
+                } else {
+                    if (!extension_loaded('pdo_sqlite')) {
+                        throw new \RuntimeException('Ekstensi PHP pdo_sqlite tidak aktif di server untuk membaca backup SQLite.');
+                    }
+                    $sqlitePdo = new \PDO('sqlite:' . $tempDbPath);
+                    $sqlitePdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+                    $tables = $sqlitePdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'migrations'")->fetchAll(\PDO::FETCH_COLUMN);
+
+                    $dump = [];
+                    foreach ($tables as $table) {
+                        $stmt = $sqlitePdo->query("SELECT * FROM \"{$table}\"");
+                        $dump[$table] = $stmt ? $stmt->fetchAll(\PDO::FETCH_ASSOC) : [];
+                    }
+                    $this->importTableDataToActiveDb($dump, $connection);
+                }
+            }
+        } finally {
+            if (File::exists($tempDir)) {
+                File::deleteDirectory($tempDir);
+            }
+        }
     }
 
     private function importTableDataToActiveDb(array $dump, string $connection): void
